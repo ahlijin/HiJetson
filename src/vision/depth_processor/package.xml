@@ -4,7 +4,7 @@
   <name>depth_processor</name> 
   <version>0.0.1</version> 
   <description>Depth processing: computes median distance for detected objects</description> 
-  <maintainer email="ahlij@example.com">ahlij</maintainer> 
+  <maintainer email="ahlijin@163.com">legend</maintainer> 
   <license>Apache-2.0</license> 
   <exec_depend>rclpy</exec_depend> 
   <exec_depend>sensor_msgs</exec_depend> 

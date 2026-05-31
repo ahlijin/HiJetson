@@ -4,7 +4,7 @@
   <name>voice_capture</name>
   <version>0.0.1</version>
   <description>Audio capture node for Orbbec Astra Pro microphone via ALSA/sounddevice</description>
-  <maintainer email="ahlij@example.com">ahlij</maintainer>
+  <maintainer email="ahlijin@163.com">legend</maintainer>
   <license>Apache-2.0</license>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>std_msgs</exec_depend>
