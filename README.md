@@ -193,14 +193,9 @@ HiJetson/
 │       ├── hijetson_all.launch.py # 全系统启动（语音+视觉+融合）
 │       ├── hijetson_voice.launch.py # 仅启动语音模块
 │       └── hijetson_vision.launch.py # 仅启动视觉模块
-├── scripts/                       # 工具脚本
-│   ├── setup_jetson.sh            # Jetson 一键环境安装脚本
-│   ├── run_all.sh                 # 全系统启动 (Jetson)
-│   ├── run_voice.sh               # 仅启动语音模块
-│   ├── run_vision.sh              # 仅启动视觉模块
-│   ├── download_models.sh         # YOLOv8 + Whisper 模型下载
-│   ├── monitor_topics.sh          # ROS2 话题实时监控
-│   └── clean.sh                   # 清理编译产物
+├── scripts/                       # 部署 & 启动脚本
+│   ├── setup_jetson.sh            # 一键环境安装（依赖 + 驱动 + 模型 + 编译）
+│   └── run_all.sh                 # 全系统启动
 └── docs/                          # 文档
     ├── hardware_setup.md          # 硬件搭建指南
     ├── jetson_setup.md            # Jetson 环境配置
@@ -298,10 +293,7 @@ source /opt/ros/humble/setup.bash
 colcon build --symlink-install
 source install/setup.bash
 
-# 4. 下载 AI 模型
-./scripts/download_models.sh
-
-# 5. 启动系统
+# 4. 启动系统
 ./scripts/run_all.sh
 ```
 
@@ -322,28 +314,28 @@ ros2 launch src/launch/hijetson_all.launch.py
 ### 仅启动语音模块（测试语音识别）
 
 ```bash
-./scripts/run_voice.sh
+ros2 launch src/launch/hijetson_voice.launch.py
 ```
 
 ### 仅启动视觉模块（测试目标检测）
 
 ```bash
-./scripts/run_vision.sh
+ros2 launch src/launch/hijetson_vision.launch.py
 ```
 
 ### 系统监控
 
 ```bash
-# 查看实时话题数据
-./scripts/monitor_topics.sh
+# 查看所有活跃话题
+ros2 topic list
 
-# 手动查看语音命令输出
+# 查看语音命令
 ros2 topic echo /voice/voice_command
 
-# 手动查看检测结果
+# 查看检测结果
 ros2 topic echo /vision/detection_result
 
-# 手动查看融合结果
+# 查看融合结果
 ros2 topic echo /fusion/result
 ```
 
@@ -397,10 +389,7 @@ ros2 topic echo /fusion/result
 
 ```bash
 # 清理编译产物
-./scripts/clean.sh
-
-# 清理全部（包括模型文件）
-./scripts/clean.sh --all
+rm -rf build/ install/ log/
 ```
 
 ## 路线图
