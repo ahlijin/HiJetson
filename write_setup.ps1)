@@ -1,1 +1,0 @@
-$lines += '    name=package_name, version="0.0.1", packages=[package_name],' 
