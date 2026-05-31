@@ -9,6 +9,7 @@ Configuration:
   ~sample_rate (int): Sample rate in Hz (default: 16000)
   ~frame_size (int): Samples per frame (default: 1600)  # 100ms at 16kHz
   ~device_index (int): ALSA/PulseAudio device index (-1 = default)
+  ~channels (int): Number of input channels (default: 1, set 2 for stereo devices like ASTRA Pro)
 """
 
 import rclpy
@@ -20,27 +21,30 @@ import numpy as np
 
 class VoiceCaptureNode(Node):
     def __init__(self):
-        super().__init__('voice_capture_node')
+        super().__init__('voice_capture')
 
         self.sample_rate = self.declare_parameter('sample_rate', 16000).value
         self.frame_size = self.declare_parameter('frame_size', 1600).value
         self.device_index = self.declare_parameter('device_index', -1).value
+        self.channels = self.declare_parameter('channels', 1).value
 
         self.publisher_ = self.create_publisher(Float32MultiArray, '/voice/audio_raw', 10)
         self.buffer = np.zeros((0,), dtype=np.float32)
 
+        device = None if self.device_index < 0 else self.device_index
+
         self.get_logger().info(
             f'VoiceCaptureNode started: {self.sample_rate}Hz, '
-            f'{self.frame_size} samples/frame'
+            f'{self.frame_size} samples/frame, device={device}, ch={self.channels}'
         )
 
         # Start audio stream
         try:
             self.stream = sd.InputStream(
                 samplerate=self.sample_rate,
-                channels=1,
+                channels=self.channels,
                 blocksize=self.frame_size,
-                device=None if self.device_index < 0 else self.device_index,
+                device=device,
                 dtype='float32',
                 callback=self.audio_callback,
             )
@@ -55,7 +59,11 @@ class VoiceCaptureNode(Node):
         if status:
             self.get_logger().warning(f'Audio status: {status}')
 
-        audio_flat = indata.flatten().astype(np.float32)
+        # If multi-channel, mix down to mono
+        if indata.shape[1] > 1:
+            audio_flat = indata.mean(axis=1).astype(np.float32)
+        else:
+            audio_flat = indata.flatten().astype(np.float32)
 
         msg = Float32MultiArray()
         msg.layout.dim.append(MultiArrayDimension(

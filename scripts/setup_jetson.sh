@@ -62,11 +62,15 @@ pip3 install onnxruntime-gpu==1.17.1
 
 # 语音
 echo "   - 语音依赖"
-pip3 install sounddevice webrtcvad numpy==1.24.3
+pip3 install sounddevice webrtcvad
 
-# Whisper (faster-whisper)
-echo "   - faster-whisper"
-pip3 install faster-whisper
+# Whisper (openai-whisper, PyTorch CUDA)
+echo "   - openai-whisper (PyTorch CUDA)"
+pip3 install openai-whisper
+
+# 修复 numba + coverage 兼容性问题
+echo "   - 修复 numba/coverage 兼容性"
+pip3 install "coverage==6.5.0"
 
 # 5. Orbbec Astra Pro 驱动
 echo ""
@@ -97,13 +101,25 @@ fi
 echo ""
 echo ">>> [7/7] 编译 ROS2 工作空间..."
 source /opt/ros/humble/setup.bash
+
+# 先编译 Orbbec 驱动
 cd src/orbbec_ws
 colcon build --symlink-install
 cd ../..
 
+# 编译全部
+colcon build --symlink-install
+
 echo ""
 echo "=== 安装完成! ==="
 echo ""
-echo "请运行: source /opt/ros/humble/setup.bash"
-echo "然后: colcon build --symlink-install"
-echo "最后: source install/setup.bash"
+echo "首次启动前需停止 PulseAudio:"
+echo "  systemctl --user stop pulseaudio.service pulseaudio.socket"
+echo ""
+echo "启动语音模块:"
+echo "  source install/setup.bash"
+echo "  ros2 launch src/launch/hijetson_voice.launch.py"
+echo ""
+echo "查看识别结果:"
+echo "  source install/setup.bash"
+echo "  ros2 topic echo /voice/asr_result"

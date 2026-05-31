@@ -1,16 +1,75 @@
-# IDE 配置文件
-.vscode/
-
-# Python compiled cache
+# ====================
+# Python
+# ====================
 __pycache__/
-*.pyc
-
-# ROS2 build artifacts
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
 build/
-log/
-install/
+*.egg
+.pytest_cache/
+*.so
 
-# Orbbec SDK logs
+# ====================
+# ROS2 build artifacts
+# ====================
+build/
+install/
+log/
+*.log
+*.log.txt
+*.bag
+*.bag.active
+
+# ====================
+# Model files (large binary, download on demand)
+# ====================
+src/models/yolo/*.onnx
+src/models/yolo/*.engine
+src/models/yolo/*.pt
+*.onnx
+*.engine
+*.trt
+
+# ====================
+# Whisper / ASR model cache
+# ====================
+.huggingface/
+.cache/huggingface/
+.cache/whisper/
+.cache/modelscope/
+
+# ====================
+# Audio test files
+# ====================
+/tmp/*.wav
+*.wav
+*.mp3
+*.flac
+
+# ====================
+# IDE / Editor
+# ====================
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ====================
+# System / temp
+# ====================
+*.bak
+*.tmp
+.env
+.env.local
+*.pid
+
+# ====================
+# Orbbec SDK
+# ====================
 Log/
 *.log.txt
-

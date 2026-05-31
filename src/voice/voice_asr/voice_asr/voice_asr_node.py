@@ -1,0 +1,119 @@
+#!/usr/bin/env python3
+"""
+voice_asr_node.py
+
+Automatic Speech Recognition using OpenAI Whisper (PyTorch CUDA).
+Subscribes to /voice/audio_clip (Float32MultiArray) from the VAD node,
+transcribes the audio, and publishes the recognized text.
+
+Publishes:
+  /voice/asr_result (std_msgs/String) - Recognized text string
+  /voice/voice_command (voice_msgs/VoiceCommand) - Structured voice command
+"""
+
+import rclpy
+from rclpy.node import Node
+from std_msgs.msg import String, Float32MultiArray
+from voice_msgs.msg import VoiceCommand
+import numpy as np
+import whisper
+import torch
+
+
+class VoiceASRNode(Node):
+    def __init__(self):
+        super().__init__('voice_asr')
+
+        # Parameters
+        self.model_size = self.declare_parameter('model_size', 'base').value
+        self.device = self.declare_parameter('device', 'cuda').value
+        self.language = self.declare_parameter('language', 'zh').value
+        self.sample_rate = self.declare_parameter('sample_rate', 16000).value
+
+        # Publishers
+        self.asr_pub = self.create_publisher(String, '/voice/asr_result', 10)
+        self.cmd_pub = self.create_publisher(VoiceCommand, '/voice/voice_command', 10)
+
+        # Subscriber to audio clips from VAD
+        self.sub = self.create_subscription(
+            Float32MultiArray, '/voice/audio_clip', self.audio_clip_callback, 10
+        )
+
+        # Load Whisper model
+        self.get_logger().info(
+            f'Loading whisper model: {self.model_size} (device={self.device})'
+        )
+        try:
+            self.model = whisper.load_model(self.model_size, device=self.device)
+            self.get_logger().info('Whisper model loaded successfully')
+        except Exception as e:
+            self.get_logger().error(f'Failed to load Whisper model: {e}')
+            self.model = None
+
+    def audio_clip_callback(self, msg: Float32MultiArray):
+        """Process an audio clip when VAD detects a complete speech segment."""
+        if self.model is None:
+            self.get_logger().warning('Whisper model not loaded, skipping')
+            return
+
+        # Convert Float32MultiArray to numpy array
+        audio = np.array(msg.data, dtype=np.float32)
+
+        if len(audio) == 0:
+            self.get_logger().warning('Received empty audio clip')
+            return
+
+        duration = len(audio) / self.sample_rate
+        self.get_logger().info(
+            f'Processing audio clip: {len(audio)} samples ({duration:.2f}s)'
+        )
+
+        # Run inference
+        try:
+            result = self.model.transcribe(
+                audio,
+                language=self.language,
+                fp16=torch.cuda.is_available(),
+                verbose=False,
+            )
+
+            full_text = result.get('text', '').strip()
+
+            if not full_text:
+                self.get_logger().info('No speech detected in audio clip')
+                return
+
+            self.get_logger().info(
+                f'Recognized: "{full_text}" (language={result.get("language", "unknown")})'
+            )
+
+            # Publish as string result
+            text_msg = String()
+            text_msg.data = full_text
+            self.asr_pub.publish(text_msg)
+
+            # Publish as structured VoiceCommand
+            cmd_msg = VoiceCommand()
+            cmd_msg.command_text = full_text
+            cmd_msg.confidence = float(result.get('confidence', 1.0) if result.get('confidence') else 1.0)
+            cmd_msg.timestamp = self.get_clock().now().to_msg()
+            self.cmd_pub.publish(cmd_msg)
+
+        except Exception as e:
+            self.get_logger().error(f'ASR inference failed: {e}')
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = VoiceASRNode()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()

@@ -19,6 +19,12 @@ def generate_launch_description():
             executable='voice_capture_node',
             name='voice_capture',
             output='screen',
+            parameters=[{
+                'sample_rate': 16000,
+                'frame_size': 1600,
+                'device_index': 0,    # ASTRA Pro USB Audio
+                'channels': 2,         # ASTRA Pro is stereo
+            }],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
         ),
         Node(
@@ -26,6 +32,12 @@ def generate_launch_description():
             executable='voice_vad_node',
             name='voice_vad',
             output='screen',
+            parameters=[{
+                'sample_rate': 16000,
+                'frame_ms': 30,
+                'silence_timeout': 0.5,
+                'vad_mode': 1,
+            }],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
         ),
         Node(
@@ -33,6 +45,12 @@ def generate_launch_description():
             executable='voice_asr_node',
             name='voice_asr',
             output='screen',
+            parameters=[{
+                'model_size': 'tiny',      # tiny/base/small/medium/large
+                'device': 'cuda',
+                'language': 'zh',
+                'sample_rate': 16000,
+            }],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
         ),
     ])

@@ -2,37 +2,149 @@
 
 ## 1. 语音采集与识别模块 (Voice Module)
 
+语音模块由四个 ROS2 包组成，位于 `src/voice/` 目录下。
+
+### 目录结构
+
+```
+src/voice/
+├── voice_capture/          # 音频采集
+│   ├── setup.py / setup.cfg
+│   ├── package.xml
+│   └── voice_capture/
+│       └── voice_capture_node.py
+├── voice_vad/              # 语音活动检测
+│   ├── setup.py / setup.cfg
+│   ├── package.xml
+│   └── voice_vad/
+│       └── voice_vad_node.py
+├── voice_asr/              # 语音识别
+│   ├── setup.py / setup.cfg
+│   ├── package.xml
+│   └── voice_asr/
+│       └── voice_asr_node.py
+└── voice_msgs/             # 自定义消息
+    ├── CMakeLists.txt
+    ├── package.xml
+    └── msg/
+        └── VoiceCommand.msg
+```
+
 ### 1.1 音频采集
-- **输入设备：** Orbbec Astra Pro 内置麦克风
-  - ALSA card: `card 0: Pro [ASTRA Pro], device 0: USB Audio [USB Audio]`
-  - 设备路径：`plughw:0,0` 或 `hw:0,0`
-- **采样率：** 16kHz（语音识别推荐采样率）
-- **ROS2 节点：** `voice_capture_node`
-  - 发布话题：`/voice/audio_raw` (audio_msgs/AudioData)
-  - 帧长：1600 样本/帧（100ms）
-  - Python 依赖：`sounddevice` (已安装 0.5.5) 或 `pyaudio`
+
+| 项目 | 说明 |
+|------|------|
+| 节点名 | `voice_capture` |
+| 输入设备 | Orbbec Astra Pro 内置麦克风 |
+| ALSA 设备 | `card 0: Pro [ASTRA Pro], device 0: USB Audio` |
+| 采样率 | 16000 Hz |
+| 通道 | 2（立体声），自动混音为单声道 |
+| 帧长 | 1600 样本（100ms） |
+| Python 依赖 | `sounddevice` |
+| 发布话题 | `/voice/audio_raw` (std_msgs/Float32MultiArray) |
+
+**注意：** ASTRA Pro 为 2 通道 USB 音频设备。使用 ALSA 直通（`device=0`）时必须指定 `channels=2`，代码内部自动将双通道混音为单声道后发布。
+
+**PulseAudio 冲突：** Jetson 上 PulseAudio 默认占用 USB 音频设备，导致 sounddevice 无法通过 ALSA 直通（`hw:0,0`）访问。需要在启动前临时停止 PulseAudio。
+
+```bash
+systemctl --user stop pulseaudio.service pulseaudio.socket
+```
 
 ### 1.2 语音活动检测 (VAD)
-- **方法：** WebRTC VAD 或 Silero VAD
-- **ROS2 节点：** `voice_vad_node`
-  - 订阅：`/voice/audio_raw`
-  - 发布：`/voice/voice_activity` (std_msgs/Bool)
-  - 检测到人声开始后缓存音频，静音超限后触发识别
+
+| 项目 | 说明 |
+|------|------|
+| 节点名 | `voice_vad` |
+| 方法 | WebRTC VAD |
+| Python 依赖 | `webrtcvad` |
+| 订阅话题 | `/voice/audio_raw` (Float32MultiArray) |
+| 发布话题 | `/voice/voice_activity` (std_msgs/Bool) — 是否正在说话 |
+| | `/voice/audio_clip` (Float32MultiArray) — 完整语音片段 |
+
+**参数：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `sample_rate` | 16000 | 采样率 |
+| `frame_ms` | 30 | VAD 帧长 (ms)，webrtcvad 要求 30ms |
+| `silence_timeout` | 0.5 | 静音超时 (秒)，超过后认为语音结束 |
+| `vad_mode` | 1 | 敏感度 0-3，3 最严格 |
+
+**工作流程：**
+1. 从 `/voice/audio_raw` 接收 PCM 音频帧
+2. 将 float32 转为 int16 PCM（webrtcvad 要求）
+3. 每 30ms 帧执行 VAD 检测
+4. 检测到语音开始后缓存音频
+5. 静音持续 `silence_timeout` 秒后，发布完整语音片段
+6. 实时推送 `/voice/voice_activity` 状态
 
 ### 1.3 语音识别 (ASR)
-- **离线方案优先**（Jetson 边缘场景、无网环境）
-- **推荐方案：**
 
-| 方案 | 模型大小 | GPU加速 | 适用性 |
-|------|----------|---------|--------|
-| **Whisper tiny** (首选) | ~150MB | ✅ TensorRT | 开源、多语言、Jetson 上已有 PyTorch 2.5 支持 |
-| **Whisper base** | ~300MB | ✅ TensorRT | 精度更高 |
-| **Vosk** | ~50MB | ❌ CPU | 轻量、适合简单命令词 |
+| 项目 | 说明 |
+|------|------|
+| 节点名 | `voice_asr` |
+| 引擎 | **openai-whisper** (PyTorch, GPU 加速) |
+| 模型 | `tiny`（默认）/ `base` / `small` |
+| 设备 | CUDA (GPU: Orin) |
+| Python 依赖 | `openai-whisper`, `numba` |
+| 订阅话题 | `/voice/audio_clip` (Float32MultiArray) |
+| 发布话题 | `/voice/asr_result` (std_msgs/String) — 识别文本 |
+| | `/voice/voice_command` (voice_msgs/VoiceCommand) — 结构化指令 |
 
-- **ROS2 节点：** `voice_asr_node`
-  - 订阅：`/voice/audio_clip` (完整音频片段)
-  - 发布：`/voice/asr_result` (std_msgs/String)
-  - 推荐使用：Whisper tiny 通过 ONNX → TensorRT 加速
+**参数：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `model_size` | tiny | tiny / base / small / medium / large |
+| `device` | cuda | cuda / cpu |
+| `language` | zh | 语言代码（zh=en, zh=Chinese） |
+| `sample_rate` | 16000 | 音频采样率 |
+
+**性能 (Jetson Orin Nano GPU):**
+
+| 模型 | 推理时间 (3s 音频) | 显存占用 |
+|------|-------------------|---------|
+| tiny | ~0.3s | ~500MB |
+| base | ~0.5s | ~800MB |
+| small | ~1.5s | ~1.5GB |
+
+**已知问题：**
+
+- `numba` 与高版本 `coverage` 不兼容，如遇 `AttributeError: module 'coverage' has no attribute 'types'`，降级 coverage：
+  ```bash
+  pip install "coverage==6.5.0"
+  ```
+- ctranslate2 (faster-whisper) 在 Jetson aarch64 上无 CUDA 支持的预编译 wheel，如需使用需从源码编译。
+
+### 1.4 ament_python 构建注意事项
+
+语音包均为 `ament_python` 类型。ROS2 的 `ros2 run` 和 `ros2 launch` 在 `<prefix>/lib/<包名>/` 下查找可执行文件，但 colcon 的 `setup.py develop` 模式将 console_scripts 安装到 `bin/` 目录。
+
+**解决方案：** 每个包根目录添加 `setup.cfg`：
+
+```ini
+[develop]
+script_dir=$base/lib/voice_capture
+```
+
+此配置将 develop 模式的脚本安装目录重定向到 `lib/<包名>/`，使 `ros2 run` 能正常找到可执行文件。
+
+### 1.5 启动流程
+
+1. `voice_capture_node` 启动音频流，发布原始音频帧
+2. `voice_vad_node` 接收音频帧，进行 VAD 检测
+3. VAD 检测到完整语音片段后发布到 `/voice/audio_clip`
+4. `voice_asr_node` 接收音频片段，使用 Whisper 进行 ASR
+5. 识别文本发布到 `/voice/asr_result` 和 `/voice/voice_command`
+
+```bash
+# 启动所有语音节点
+ros2 launch src/launch/hijetson_voice.launch.py
+
+# 查看识别结果
+ros2 topic echo /voice/asr_result
+```
 
 ## 2. 图像采集与识别模块 (Vision Module)
 
@@ -122,9 +234,9 @@ builtin_interfaces/Time timestamp
 
 | 话题 | 类型 | 发布者 | 说明 |
 |------|------|--------|------|
-| `/voice/audio_raw` | `audio_msgs/AudioData` | voice_capture | 16kHz PCM音频帧 |
+| `/voice/audio_raw` | `Float32MultiArray` | voice_capture | 16kHz PCM音频帧 |
 | `/voice/voice_activity` | `std_msgs/Bool` | voice_vad | 语音活动标志 |
-| `/voice/audio_clip` | `audio_msgs/AudioData` | voice_vad | 完整语音片段 |
+| `/voice/audio_clip` | `Float32MultiArray` | voice_vad | 完整语音片段 |
 | `/voice/asr_result` | `std_msgs/String` | voice_asr | ASR识别文本 |
 | `/voice/voice_command` | `VoiceCommand` | voice_asr | 结构化语音指令 |
 | `/camera/color/image_raw` | `sensor_msgs/Image` | astra_camera | RGB彩色图 |
@@ -139,8 +251,8 @@ builtin_interfaces/Time timestamp
 
 | 模块 | 延迟 | 帧率/FPS | 备注 |
 |------|------|----------|------|
-| 语音识别 (Whisper tiny) | ~300-500ms | - | faster-whisper on GPU, 单次指令 |
-| 语音识别 (Whisper base) | ~500-800ms | - | 精度更高，适合中英文混合 |
+| 语音识别 (Whisper tiny) | ~300ms | - | openai-whisper on CUDA, 单次指令 |
+| 语音识别 (Whisper base) | ~500ms | - | 精度更高，适合中英文混合 |
 | 目标检测 (YOLOv8n ONNX) | ~10-15ms | ~60-80 FPS | 640×480 输入，GPU 运行 |
 | 目标检测 (YOLOv8s ONNX) | ~15-25ms | ~40-60 FPS | 640×480 输入 |
 | 深度图获取 | - | 30 FPS | 硬件直接输出 |
