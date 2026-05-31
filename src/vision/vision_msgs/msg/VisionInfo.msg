@@ -1,0 +1,4 @@
+uint32 image_width
+uint32 image_height
+string encoding
+builtin_interfaces/Time timestamp

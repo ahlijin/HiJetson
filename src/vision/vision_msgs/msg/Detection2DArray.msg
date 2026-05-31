@@ -1,0 +1,2 @@
+VisionInfo vision_info
+vision_msgs/Detection2D[] detections

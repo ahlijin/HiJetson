@@ -1,0 +1,29 @@
+# 系统级参数配置
+
+system:
+  robot_name: "HiJetson"
+  log_level: "INFO"   # DEBUG / INFO / WARN / ERROR
+  use_sim_time: false
+
+sensors:
+  camera:
+    color_topic: "/camera/color/image_raw"
+    depth_topic: "/camera/depth/image_raw"
+    color_width: 1280
+    color_height: 720
+    fps: 30
+  microphone:
+    device: "default"
+    sample_rate: 16000
+
+topics:
+  audio_raw: "/voice/audio_raw"
+  audio_clip: "/voice/audio_clip"
+  voice_activity: "/voice/voice_activity"
+  asr_result: "/voice/asr_result"
+  voice_command: "/voice/voice_command"
+  preprocessed_image: "/vision/preprocessed_image"
+  detection_result: "/vision/detection_result"
+  detected_image: "/vision/detected_image"
+  distance_result: "/vision/distance_result"
+  fusion_result: "/fusion/result"

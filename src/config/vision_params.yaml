@@ -1,0 +1,15 @@
+# 视觉模块参数配置
+
+image_preprocess:
+  input_width: 640
+  input_height: 640
+
+object_detection:
+  model_path: "src/models/yolo/yolov8n.onnx"
+  conf_threshold: 0.5
+  iou_threshold: 0.45
+  input_width: 640
+  input_height: 640
+
+depth_processor:
+  max_depth: 10.0    # max valid depth in meters

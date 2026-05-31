@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypesets="gdb"?>
+<package format="3">
+  <name>voice_vad</name>
+  <version>0.0.1</version>
+  <description>Voice activity detection node using webrtcvad</description>
+  <maintainer email="ahlij@example.com">ahlij</maintainer>
+  <license>Apache-2.0</license>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>webrtcvad</exec_depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

@@ -1,0 +1,18 @@
+# 语音模块参数配置
+
+voice_capture:
+  sample_rate: 16000
+  frame_size: 1600    # 100ms @ 16kHz
+  device_index: -1    # -1 = default device
+
+voice_vad:
+  sample_rate: 16000
+  frame_ms: 30         # webrtcvad requires 30ms frames
+  silence_timeout: 0.5 # seconds of silence before clip ends
+  vad_mode: 1          # 0=least aggressive, 3=most aggressive
+
+voice_asr:
+  model_size: "base"   # tiny/base/small/medium/large
+  device: "cuda"       # cuda or cpu
+  compute_type: "float16"  # float16/float32/int8
+  language: "zh"       # zh = Chinese, en = English
