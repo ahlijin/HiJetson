@@ -14,7 +14,7 @@ setup(
     zip_safe=True,
     maintainer='legend',
     maintainer_email='ahlijin@163.com',
-    description='Speech recognition using faster-whisper',
+    description='Speech recognition using openai-whisper (PyTorch CUDA)',
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={

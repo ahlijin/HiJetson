@@ -2,8 +2,10 @@
 hijetson_voice.launch.py
 
 仅启动语音模块（语音采集 + VAD + ASR）
+从 src/config/voice_params.yaml 加载参数
 """
 
+import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
@@ -11,6 +13,11 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
+    # 获取 config 文件路径
+    launch_dir = os.path.dirname(os.path.realpath(__file__))
+    config_file = os.path.join(launch_dir, '..', 'config', 'voice_params.yaml')
+    config_file = os.path.abspath(config_file)
+
     return LaunchDescription([
         DeclareLaunchArgument('log_level', default_value='info'),
 
@@ -19,12 +26,7 @@ def generate_launch_description():
             executable='voice_capture_node',
             name='voice_capture',
             output='screen',
-            parameters=[{
-                'sample_rate': 16000,
-                'frame_size': 1600,
-                'device_index': 0,    # ASTRA Pro USB Audio
-                'channels': 2,         # ASTRA Pro is stereo
-            }],
+            parameters=[config_file],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
         ),
         Node(
@@ -32,12 +34,7 @@ def generate_launch_description():
             executable='voice_vad_node',
             name='voice_vad',
             output='screen',
-            parameters=[{
-                'sample_rate': 16000,
-                'frame_ms': 30,
-                'silence_timeout': 0.5,
-                'vad_mode': 1,
-            }],
+            parameters=[config_file],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
         ),
         Node(
@@ -45,12 +42,7 @@ def generate_launch_description():
             executable='voice_asr_node',
             name='voice_asr',
             output='screen',
-            parameters=[{
-                'model_size': 'tiny',      # tiny/base/small/medium/large
-                'device': 'cuda',
-                'language': 'zh',
-                'sample_rate': 16000,
-            }],
+            parameters=[config_file],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
         ),
     ])

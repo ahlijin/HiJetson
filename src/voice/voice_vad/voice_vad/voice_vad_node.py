@@ -25,7 +25,8 @@ class VoiceVADNode(Node):
         self.sample_rate = self.declare_parameter('sample_rate', 16000).value
         self.frame_ms = self.declare_parameter('frame_ms', 30).value  # 30ms for webrtcvad
         self.silence_timeout = self.declare_parameter('silence_timeout', 0.5).value  # seconds
-        self.vad_mode = self.declare_parameter('vad_mode', 1).value  # 0-3, more aggressive
+        self.vad_mode = self.declare_parameter('vad_mode', 3).value  # 0-3, more aggressive
+        self.min_energy = self.declare_parameter('min_energy', 0.005).value  # RMS能量门限，过滤环境噪声
 
         # webrtcvad requires 16-bit PCM, 16kHz, 30ms frames (480 samples)
         self.vad = webrtcvad.Vad(self.vad_mode)
@@ -59,7 +60,13 @@ class VoiceVADNode(Node):
             if len(frame) < self.frame_samples:
                 continue
 
-            is_speech = self.vad.is_speech(frame.tobytes(), self.sample_rate)
+            # RMS能量过滤：低于门限的直接判为非语音，避免风扇/环境噪音误触发
+            frame_f32 = frame.astype(np.float32) / 32767.0
+            rms = np.sqrt(np.mean(frame_f32 ** 2))
+            if rms < self.min_energy:
+                is_speech = False
+            else:
+                is_speech = self.vad.is_speech(frame.tobytes(), self.sample_rate)
 
             if is_speech:
                 if not self.speech_active:

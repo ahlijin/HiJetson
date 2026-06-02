@@ -1,21 +1,25 @@
 # 语音模块参数配置
 
 voice_capture:
-  sample_rate: 16000
-  frame_size: 1600
-  device_index: 0     # 0 = ASTRA Pro USB Audio
-  channels: 2         # ASTRA Pro is 2ch stereo
+  ros__parameters:
+    sample_rate: 16000
+    frame_size: 1920      # 120ms, 与 VAD 30ms 对齐 (480×4)
+    device_index: 0       # 0 = ASTRA Pro USB Audio (hw:0,0)
+    channels: 1           # 单声道直采
+    hp_cutoff: 300        # 高通滤波，去除 Jetson 风扇噪声
 
 voice_vad:
-  sample_rate: 16000
-  frame_ms: 30
-  silence_timeout: 0.5
-  vad_mode: 1
+  ros__parameters:
+    sample_rate: 16000
+    frame_ms: 30
+    silence_timeout: 0.5
+    vad_mode: 3            # 0=最低 3=最严格
+    min_energy: 0.015      # RMS能量门限，过滤环境噪声
 
 voice_asr:
-  model_path: "/home/nvidia/.cache/modelscope/pengzhendong/faster-whisper-base"
-  model_size: "base"
-  device: "cpu"
-  compute_type: "int8"
-  language: "zh"
-  sample_rate: 16000
+  ros__parameters:
+    model_size: "base"     # tiny/base/small/medium/large
+    device: "cuda"         # cuda or cpu
+    language: "zh"
+    sample_rate: 16000
+    hp_cutoff: 300         # 高通滤波，去除 Jetson 风扇噪声

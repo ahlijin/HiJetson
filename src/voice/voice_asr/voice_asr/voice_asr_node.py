@@ -18,6 +18,7 @@ from voice_msgs.msg import VoiceCommand
 import numpy as np
 import whisper
 import torch
+from scipy.signal import butter, sosfilt
 
 
 class VoiceASRNode(Node):
@@ -29,6 +30,10 @@ class VoiceASRNode(Node):
         self.device = self.declare_parameter('device', 'cuda').value
         self.language = self.declare_parameter('language', 'zh').value
         self.sample_rate = self.declare_parameter('sample_rate', 16000).value
+
+        # High-pass filter: 去除 139Hz Jetson 风扇噪声
+        self.hp_cutoff = self.declare_parameter('hp_cutoff', 300).value
+        self._init_hp_filter()
 
         # Publishers
         self.asr_pub = self.create_publisher(String, '/voice/asr_result', 10)
@@ -50,6 +55,25 @@ class VoiceASRNode(Node):
             self.get_logger().error(f'Failed to load Whisper model: {e}')
             self.model = None
 
+    def _init_hp_filter(self):
+        """初始化高通滤波器（Butterworth 4阶），去除风扇等低频噪声。"""
+        self._hp_sos = butter(4, self.hp_cutoff, btype='high', fs=self.sample_rate, output='sos')
+        self.get_logger().info(f'High-pass filter initialized: cutoff={self.hp_cutoff}Hz')
+
+    def _preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
+        """预处理音频：高通滤波 + RMS归一化。"""
+        # 1. 高通滤波去除低频噪声（风扇/空调）
+        filtered = sosfilt(self._hp_sos, audio).astype(np.float32)
+
+        # 2. RMS归一化到目标电平
+        rms = np.sqrt(np.mean(filtered ** 2))
+        target_rms = 0.08  # 目标 RMS 电平
+        if rms > 1e-6:
+            filtered = filtered * (target_rms / rms)
+
+        # 裁剪防止削波
+        return np.clip(filtered, -1.0, 1.0)
+
     def audio_clip_callback(self, msg: Float32MultiArray):
         """Process an audio clip when VAD detects a complete speech segment."""
         if self.model is None:
@@ -67,6 +91,9 @@ class VoiceASRNode(Node):
         self.get_logger().info(
             f'Processing audio clip: {len(audio)} samples ({duration:.2f}s)'
         )
+
+        # 预处理：高通滤波 + 归一化
+        audio = self._preprocess_audio(audio)
 
         # Run inference
         try:

@@ -114,18 +114,19 @@ HiJetson/
 ## 快速启动
 
 ```bash
-# 1. 停止 PulseAudio（与 ASTRA Pro ALSA 直通冲突）
-systemctl --user stop pulseaudio.service pulseaudio.socket
-
-# 2. 启动语音模块
 cd /home/nvidia/HiJetson
-source install/setup.bash
-ros2 launch src/launch/hijetson_voice.launch.py
+bash scripts/run_voice.sh
+```
 
-# 3. 另一个终端看识别结果
-source install/setup.bash
+脚本自动暂停 PulseAudio → 启动节点 → 退出后恢复。
+
+查看识别结果（另一个终端）：
+```bash
+source /home/nvidia/HiJetson/install/setup.bash
 ros2 topic echo /voice/asr_result
 ```
+
+参数配置见 `src/config/voice_params.yaml`。
 
 ## 路线图
 
@@ -139,6 +140,7 @@ ros2 topic echo /voice/asr_result
 - [x] 语音采集节点开发 (voice_capture)
 - [x] VAD 节点开发 (voice_vad)
 - [x] ASR 节点开发 - openai-whisper CUDA (voice_asr)
+- [x] 语音管线修复与性能调优（PulseAudio冲突/VAD误触发/高通滤波）
 - [ ] 图像预处理节点开发 (image_preprocess)
 - [ ] YOLOv8 + ONNX Runtime 检测节点开发 (object_detection)
 - [ ] 深度处理节点开发 (depth_processor)

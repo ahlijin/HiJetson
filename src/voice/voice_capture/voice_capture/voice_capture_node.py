@@ -17,6 +17,7 @@ from rclpy.node import Node
 from std_msgs.msg import Float32MultiArray, MultiArrayDimension
 import sounddevice as sd
 import numpy as np
+from scipy.signal import butter, sosfilt
 
 
 class VoiceCaptureNode(Node):
@@ -30,6 +31,10 @@ class VoiceCaptureNode(Node):
 
         self.publisher_ = self.create_publisher(Float32MultiArray, '/voice/audio_raw', 10)
         self.buffer = np.zeros((0,), dtype=np.float32)
+
+        # 高通滤波器：去除 Jetson 风扇低频噪声 (139Hz)
+        self.hp_cutoff = self.declare_parameter('hp_cutoff', 300).value
+        self._hp_sos = butter(4, self.hp_cutoff, btype='high', fs=self.sample_rate, output='sos')
 
         device = None if self.device_index < 0 else self.device_index
 
@@ -61,15 +66,18 @@ class VoiceCaptureNode(Node):
 
         # If multi-channel, mix down to mono
         if indata.shape[1] > 1:
-            audio_flat = indata.mean(axis=1).astype(np.float32)
+            audio = indata.mean(axis=1).astype(np.float32)
         else:
-            audio_flat = indata.flatten().astype(np.float32)
+            audio = indata.flatten().astype(np.float32)
+
+        # 高通滤波去除 Jetson 风扇低频噪声
+        audio = sosfilt(self._hp_sos, audio).astype(np.float32)
 
         msg = Float32MultiArray()
         msg.layout.dim.append(MultiArrayDimension(
-            label='samples', size=len(audio_flat), stride=1
+            label='samples', size=len(audio), stride=1
         ))
-        msg.data = audio_flat.tolist()
+        msg.data = audio.tolist()
         self.publisher_.publish(msg)
 
     def destroy_node(self):
