@@ -31,6 +31,12 @@ class VoiceASRNode(Node):
         self.language = self.declare_parameter('language', 'zh').value
         self.sample_rate = self.declare_parameter('sample_rate', 16000).value
 
+        # ── Wake word gating ────────────────────────────────────────
+        self.wake_word_enabled = self.declare_parameter('wake_word_enabled', True).value
+        self.wake_word_timeout = self.declare_parameter('wake_word_timeout', 5.0).value
+        self._awake = not self.wake_word_enabled  # if disabled, always awake
+        self._awake_timer = None
+
         # High-pass filter: 去除 139Hz Jetson 风扇噪声
         self.hp_cutoff = self.declare_parameter('hp_cutoff', 300).value
         self._init_hp_filter()
@@ -43,6 +49,15 @@ class VoiceASRNode(Node):
         self.sub = self.create_subscription(
             Float32MultiArray, '/voice/audio_clip', self.audio_clip_callback, 10
         )
+
+        # Subscriber to wake word trigger (only if enabled)
+        if self.wake_word_enabled:
+            self._ww_sub = self.create_subscription(
+                String, '/voice/wake_word', self.wake_word_callback, 10
+            )
+            self.get_logger().info(
+                f'Wake word gating enabled: timeout={self.wake_word_timeout}s'
+            )
 
         # Load Whisper model
         self.get_logger().info(
@@ -59,6 +74,29 @@ class VoiceASRNode(Node):
         """初始化高通滤波器（Butterworth 4阶），去除风扇等低频噪声。"""
         self._hp_sos = butter(4, self.hp_cutoff, btype='high', fs=self.sample_rate, output='sos')
         self.get_logger().info(f'High-pass filter initialized: cutoff={self.hp_cutoff}Hz')
+
+    # ── Wake word handling ─────────────────────────────────────────
+
+    def wake_word_callback(self, msg: String):
+        """Wake word detected — stay awake for wake_word_timeout seconds."""
+        self._awake = True
+        # Cancel any existing timer
+        if self._awake_timer is not None:
+            self._awake_timer.cancel()
+        # Set one-shot timer to go back to sleep
+        self._awake_timer = self.create_timer(self.wake_word_timeout, self._go_to_sleep)
+
+        self.get_logger().info(
+            f'Wake word received: "{msg.data}" — '
+            f'listening for {self.wake_word_timeout}s'
+        )
+
+    def _go_to_sleep(self):
+        self._awake = False
+        if self._awake_timer is not None:
+            self._awake_timer.cancel()
+            self._awake_timer = None
+        self.get_logger().info('Wake word timeout — going back to sleep')
 
     def _preprocess_audio(self, audio: np.ndarray) -> np.ndarray:
         """预处理音频：高通滤波 + RMS归一化。"""
@@ -78,6 +116,11 @@ class VoiceASRNode(Node):
         """Process an audio clip when VAD detects a complete speech segment."""
         if self.model is None:
             self.get_logger().warning('Whisper model not loaded, skipping')
+            return
+
+        # ── Wake word gate ─────────────────────────────────────────
+        if not self._awake:
+            self.get_logger().debug('Ignoring audio clip — not awake (say wake word first)')
             return
 
         # Convert Float32MultiArray to numpy array

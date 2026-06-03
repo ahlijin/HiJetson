@@ -27,6 +27,7 @@ HiJetson 是一个基于 **NVIDIA Jetson Orin Nano 8G** 平台，配合 **Orbbec
 | OpenCV | **4.10.0** |
 | Whisper | **openai-whisper** (PyTorch CUDA) |
 | sounddevice | **0.5.5** |
+| OpenWakeWord | **0.6.0** (TFLite, CPU) |
 
 ## 软件架构
 
@@ -42,21 +43,22 @@ HiJetson 是一个基于 **NVIDIA Jetson Orin Nano 8G** 平台，配合 **Orbbec
 │  │  │ 音频采集节点    │  │    │  │ 相机驱动节点          │ │  │
 │  │  │ (ASTRA Pro麦克风)│  │    │  │ (ros2_astra_camera)  │ │  │
 │  │  └───────┬───────┘  │    │  └────────┬──────────────┘ │  │
-│  │          │          │    │           │                │  │
-│  │  ┌───────▼───────┐  │    │  ┌────────▼──────────────┐ │  │
-│  │  │ 语音活动检测    │  │    │  │ 图像预处理节点        │ │  │
-│  │  │ (WebRTC VAD)   │  │    │  │ (色彩校正/缩放/裁切)    │ │  │
-│  │  └───────┬───────┘  │    │  └────────┬──────────────┘ │  │
-│  │          │          │    │           │                │  │
-│  │  ┌───────▼───────┐  │    │  ┌────────▼──────────────┐ │  │
-│  │  │ 语音识别节点    │  │    │  │ 目标检测/识别节点     │ │  │
-│  │  │ (Whisper CUDA) │  │    │  │ (YOLO + TensorRT)   │ │  │
-│  │  └───────┬───────┘  │    │  └────────┬──────────────┘ │  │
-│  │          │          │    │           │                │  │
-│  │          │          │    │  ┌────────▼──────────────┐ │  │
-│  │          │          │    │  │ 深度处理节点           │ │  │
-│  │  ┌───────▼────────┐ │    │  │ (点云/距离测量)        │ │  │
-│  │  │  决策/融合节点   │ │    │  └────────┬──────────────┘ │  │
+│  │     ┌────┴────┐     │    │           │                │  │
+│  │     │         │     │    │  ┌────────▼──────────────┐ │  │
+│  │  ┌──▼───┐  ┌──▼──┐ │    │  │ 图像预处理节点        │ │  │
+│  │  │ VAD  │  │唤醒词│ │    │  │ (色彩校正/缩放/裁切)   │ │  │
+│  │  │      │  │检测  │ │    │  └────────┬──────────────┘ │  │
+│  │  └──┬───┘  └──┬──┘ │    │           │                │  │
+│  │     └────┬────┘     │    │  ┌────────▼──────────────┐ │  │
+│  │          │          │    │  │ 目标检测/识别节点     │ │  │
+│  │  ┌───────▼───────┐  │    │  │ (YOLO + TensorRT)   │ │  │
+│  │  │ 语音识别节点    │  │    │  └────────┬──────────────┘ │  │
+│  │  │ (Whisper CUDA) │  │    │           │                │  │
+│  │  │ (需要唤醒词触发)│  │    │  ┌────────▼──────────────┐ │  │
+│  │  └───────┬───────┘  │    │  │ 深度处理节点           │ │  │
+│  │          │          │    │  │ (点云/距离测量)        │ │  │
+│  │  ┌───────▼────────┐ │    │  └────────┬──────────────┘ │  │
+│  │  │  决策/融合节点   │ │    │           │                │  │
 │  │  │  (多模态融合)    │◄─┼────────────────┘                │  │
 │  │  └───────┬────────┘ │                                     │
 │  │          │          │                                     │
@@ -85,6 +87,7 @@ HiJetson/
 │   ├── voice/                     # 语音模块包组
 │   │   ├── voice_capture/         # 音频采集节点 (sounddevice, 16kHz PCM)
 │   │   ├── voice_vad/             # 语音活动检测节点 (WebRTC VAD)
+│   │   ├── voice_wake_word/       # 唤醒词检测节点 (OpenWakeWord)
 │   │   ├── voice_asr/             # 语音识别节点 (openai-whisper, GPU加速)
 │   │   └── voice_msgs/            # 语音模块自定义消息
 │   ├── vision/                    # 视觉模块包组
@@ -115,10 +118,14 @@ HiJetson/
 
 ```bash
 cd /home/nvidia/HiJetson
+
+# 启动语音管线（含唤醒词）
 bash scripts/run_voice.sh
 ```
 
 脚本自动暂停 PulseAudio → 启动节点 → 退出后恢复。
+
+**唤醒词模式**：说 "Hey Jarvis" 唤醒，唤醒后 5s 内说话会被转写。如需关闭唤醒词直接 ASR，编辑 `src/config/voice_params.yaml`，设 `voice_asr.wake_word_enabled: False`。
 
 查看识别结果（另一个终端）：
 ```bash
@@ -126,7 +133,29 @@ source /home/nvidia/HiJetson/install/setup.bash
 ros2 topic echo /voice/asr_result
 ```
 
+查看唤醒词检测状态：
+```bash
+ros2 topic echo /voice/wake_word
+```
+
 参数配置见 `src/config/voice_params.yaml`。
+
+## 语音流水线话题拓扑
+
+```
+capture → /voice/audio_raw
+              ├→ VAD → /voice/audio_clip ──→ ASR (gated)
+              └→ wake_word → /voice/wake_word ──→ ASR (wake gate)
+```
+
+| Topic | 类型 | 发布者 | 说明 |
+|-------|------|--------|------|
+| `/voice/audio_raw` | Float32MultiArray | voice_capture | 原始音频帧 (16kHz, float32) |
+| `/voice/voice_activity` | Bool | voice_vad | VAD 活动状态 |
+| `/voice/audio_clip` | Float32MultiArray | voice_vad | 完整的语音片段 |
+| `/voice/wake_word` | String | voice_wake_word | 唤醒词触发信号 |
+| `/voice/asr_result` | String | voice_asr | ASR 转写结果 |
+| `/voice/voice_command` | VoiceCommand | voice_asr | 结构化语音命令 |
 
 ## 路线图
 
@@ -141,6 +170,7 @@ ros2 topic echo /voice/asr_result
 - [x] VAD 节点开发 (voice_vad)
 - [x] ASR 节点开发 - openai-whisper CUDA (voice_asr)
 - [x] 语音管线修复与性能调优（PulseAudio冲突/VAD误触发/高通滤波）
+- [x] 唤醒词检测节点开发 (voice_wake_word, OpenWakeWord)
 - [ ] 图像预处理节点开发 (image_preprocess)
 - [ ] YOLOv8 + ONNX Runtime 检测节点开发 (object_detection)
 - [ ] 深度处理节点开发 (depth_processor)
@@ -155,7 +185,7 @@ ros2 topic echo /voice/asr_result
 - [NVIDIA TensorRT 10.7 文档](https://docs.nvidia.com/deeplearning/tensorrt/)
 - [YOLOv8 - Ultralytics](https://github.com/ultralytics/ultralytics)
 - [OpenAI Whisper](https://github.com/openai/whisper)
-- [faster-whisper (CTranslate2)](https://github.com/SYSTRAN/faster-whisper)
+- [OpenWakeWord](https://github.com/dscripka/openWakeWord)
 - [WebRTC VAD](https://github.com/wiseman/py-webrtcvad)
 
 ## 许可证

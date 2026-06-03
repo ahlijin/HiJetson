@@ -16,10 +16,19 @@ voice_vad:
     vad_mode: 3            # 0=最低 3=最严格
     min_energy: 0.015      # RMS能量门限，过滤环境噪声
 
+voice_wake_word:
+  ros__parameters:
+    model_name: "hey_jarvis"
+    threshold: 0.5
+    cooldown: 3.0
+    sample_rate: 16000
+
 voice_asr:
   ros__parameters:
-    model_size: "base"     # tiny/base/small/medium/large
+    model_size: "small"     # tiny/base/small/medium/large
     device: "cuda"         # cuda or cpu
     language: "zh"
     sample_rate: 16000
     hp_cutoff: 300         # 高通滤波，去除 Jetson 风扇噪声
+    wake_word_enabled: True
+    wake_word_timeout: 5.0

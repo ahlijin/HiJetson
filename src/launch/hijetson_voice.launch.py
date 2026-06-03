@@ -1,7 +1,7 @@
 """
 hijetson_voice.launch.py
 
-仅启动语音模块（语音采集 + VAD + ASR）
+仅启动语音模块（语音采集 + VAD + 唤醒词 + ASR）
 从 src/config/voice_params.yaml 加载参数
 """
 
@@ -33,6 +33,14 @@ def generate_launch_description():
             package='voice_vad',
             executable='voice_vad_node',
             name='voice_vad',
+            output='screen',
+            parameters=[config_file],
+            arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+        ),
+        Node(
+            package='voice_wake_word',
+            executable='voice_wake_word_node',
+            name='voice_wake_word',
             output='screen',
             parameters=[config_file],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
