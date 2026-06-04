@@ -16,7 +16,7 @@ Configuration (from voice_params.yaml):
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String, Float32MultiArray
+from std_msgs.msg import String, Float32MultiArray, Bool
 import numpy as np
 import os
 
@@ -37,11 +37,16 @@ class VoiceWakeWordNode(Node):
 
         # ── State ───────────────────────────────────────────────────
         self._last_trigger_time = 0.0
+        self._vad_active = True  # Default to True for backward compat
 
         # ── Publisher / Subscriber ──────────────────────────────────
         self.pub = self.create_publisher(String, '/voice/wake_word', 10)
         self.sub = self.create_subscription(
             Float32MultiArray, '/voice/audio_raw', self.audio_callback, 10
+        )
+        # VAD gate: only run wake word inference when VAD detects speech
+        self._vad_sub = self.create_subscription(
+            Bool, '/voice/voice_activity', self.vad_callback, 10
         )
 
         self.get_logger().info(
@@ -91,7 +96,15 @@ class VoiceWakeWordNode(Node):
             self.get_logger().error(f'Failed to load OpenWakeWord model: {e}')
             self._model = None
 
+    def vad_callback(self, msg: Bool):
+        """VAD activity gate — only run wake word inference when speech is active."""
+        self._vad_active = msg.data
+
     def audio_callback(self, msg: Float32MultiArray):
+        # VAD gate: skip inference when no speech activity
+        if not self._vad_active:
+            return
+
         if self._model is None:
             return
 

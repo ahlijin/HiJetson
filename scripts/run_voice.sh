@@ -1,7 +1,9 @@
 #!/bin/bash
 #==============================================================================
 # HiJetson 语音模块启动脚本
-# 使用 ROS2 launch 文件启动语音采集 + VAD + ASR
+# 使用 ROS2 launch 文件启动语音采集 + VAD + 唤醒词 + 反馈提示音 + ASR
+#
+# capture 和 feedback 都走 PulseAudio 默认设备，无需手动释放麦克风。
 #==============================================================================
 
 set -e
@@ -17,11 +19,10 @@ if [ -f "$WORKSPACE_DIR/install/setup.bash" ]; then
     source "$WORKSPACE_DIR/install/setup.bash"
 fi
 
-echo ">>> 启动语音模块 (音频采集 + VAD + ASR) ..."
-echo "    模型: whisper tiny (CUDA)"
-echo "    麦克风: ASTRA Pro (ALSA hw:0,0)"
+echo ">>> 启动语音模块 (采集 -> VAD -> 唤醒词 -> 反馈音 -> ASR) ..."
+echo "    模型: whisper small (CUDA)"
+echo "    全部走 PulseAudio 默认设备 (输入+输出都走PA)"
 echo ""
 
-# pasuspender 暂停 PulseAudio 对 ALSA 设备的占用，确保直连 ASTRA Pro
-exec env PULSE_SERVER=/run/user/1000/pulse/native pasuspender -- \
+exec env PULSE_SERVER=/run/user/1000/pulse/native \
     ros2 launch "$WORKSPACE_DIR/src/launch/hijetson_voice.launch.py"

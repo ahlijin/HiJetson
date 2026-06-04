@@ -135,6 +135,14 @@ class VoiceASRNode(Node):
             f'Processing audio clip: {len(audio)} samples ({duration:.2f}s)'
         )
 
+        # ── 能量检查：过滤低能量噪音片段，避免 Whisper 幻觉 ─────────
+        raw_rms = np.sqrt(np.mean(audio ** 2))
+        if raw_rms < 0.005:  # 原始能量太低→非人声，跳过
+            self.get_logger().info(
+                f'Ignoring low-energy clip (RMS={raw_rms:.6f}) — likely noise'
+            )
+            return
+
         # 预处理：高通滤波 + 归一化
         audio = self._preprocess_audio(audio)
 

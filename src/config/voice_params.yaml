@@ -4,7 +4,7 @@ voice_capture:
   ros__parameters:
     sample_rate: 16000
     frame_size: 1920      # 120ms, 与 VAD 30ms 对齐 (480×4)
-    device_index: 0       # 0 = ASTRA Pro USB Audio (hw:0,0)
+    device_index: -1        # -1 = PulseAudio 默认输入 (通过PA管理ASTRA Pro, 无冲突)
     channels: 1           # 单声道直采
     hp_cutoff: 300        # 高通滤波，去除 Jetson 风扇噪声
 
@@ -22,6 +22,13 @@ voice_wake_word:
     threshold: 0.5
     cooldown: 3.0
     sample_rate: 16000
+
+voice_feedback:
+  ros__parameters:
+    device_index: -1        # -1 = 默认输出设备 (PulseAudio 路由到当前默认音频输出，如蓝牙音箱)
+    wake_volume: 0.5        # 唤醒提示音量 (0.0-1.0)
+    result_volume: 0.3      # 识别结果提示音量 (0.0-1.0)
+    sample_rate: 48000
 
 voice_asr:
   ros__parameters:

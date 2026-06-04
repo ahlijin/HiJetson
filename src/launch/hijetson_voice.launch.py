@@ -46,6 +46,14 @@ def generate_launch_description():
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
         ),
         Node(
+            package='voice_feedback',
+            executable='voice_feedback_node',
+            name='voice_feedback',
+            output='screen',
+            parameters=[config_file],
+            arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+        ),
+        Node(
             package='voice_asr',
             executable='voice_asr_node',
             name='voice_asr',

@@ -13,6 +13,11 @@ from launch_ros.actions import Node, PushRosNamespace
 
 
 def generate_launch_description():
+    # 获取 config 文件路径
+    launch_dir = os.path.dirname(os.path.realpath(__file__))
+    config_file = os.path.join(launch_dir, '..', 'config', 'voice_params.yaml')
+    config_file = os.path.abspath(config_file)
+
     return LaunchDescription([
         # ===== 全局参数 =====
         DeclareLaunchArgument('use_sim_time', default_value='false'),
@@ -27,11 +32,7 @@ def generate_launch_description():
                 package='voice_capture',
                 executable='voice_capture_node',
                 name='voice_capture',
-                parameters=[{
-                    'sample_rate': 16000,
-                    'frame_size': 1600,
-                    'device_index': -1,
-                }],
+                parameters=[config_file],
                 arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
                 output='screen',
             ),
@@ -41,12 +42,27 @@ def generate_launch_description():
                 package='voice_vad',
                 executable='voice_vad_node',
                 name='voice_vad',
-                parameters=[{
-                    'sample_rate': 16000,
-                    'frame_ms': 30,
-                    'silence_timeout': 0.5,
-                    'vad_mode': 1,
-                }],
+                parameters=[config_file],
+                arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+                output='screen',
+            ),
+
+            # 唤醒词检测
+            Node(
+                package='voice_wake_word',
+                executable='voice_wake_word_node',
+                name='voice_wake_word',
+                parameters=[config_file],
+                arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+                output='screen',
+            ),
+
+            # 语音反馈提示音
+            Node(
+                package='voice_feedback',
+                executable='voice_feedback_node',
+                name='voice_feedback',
+                parameters=[config_file],
                 arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
                 output='screen',
             ),
@@ -56,12 +72,7 @@ def generate_launch_description():
                 package='voice_asr',
                 executable='voice_asr_node',
                 name='voice_asr',
-                parameters=[{
-                    'model_size': 'base',
-                    'device': 'cuda',
-                    'compute_type': 'float16',
-                    'language': 'zh',
-                }],
+                parameters=[config_file],
                 arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
                 output='screen',
             ),
