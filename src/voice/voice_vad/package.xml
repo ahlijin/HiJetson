@@ -3,12 +3,12 @@
 <package format="3">
   <name>voice_vad</name>
   <version>0.0.1</version>
-  <description>Voice activity detection node using webrtcvad</description>
+  <description>Voice activity detection node (XVF3000 hardware VAD)</description>
   <maintainer email="ahlijin@163.com">legend</maintainer>
   <license>Apache-2.0</license>
   <exec_depend>rclpy</exec_depend>
   <exec_depend>std_msgs</exec_depend>
-  <exec_depend>webrtcvad</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
   <export>
     <build_type>ament_python</build_type>
   </export>

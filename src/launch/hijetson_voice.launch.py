@@ -61,4 +61,13 @@ def generate_launch_description():
             parameters=[config_file],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
         ),
+        # 声源定位 (XVF3000 DOA)
+        Node(
+            package='voice_doa',
+            executable='voice_doa_node',
+            name='voice_doa',
+            output='screen',
+            parameters=[config_file],
+            arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+        ),
     ])

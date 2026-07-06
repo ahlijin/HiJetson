@@ -62,7 +62,7 @@ pip3 install onnxruntime-gpu==1.17.1
 
 # 语音
 echo "   - 语音依赖"
-pip3 install sounddevice webrtcvad
+pip3 install sounddevice
 
 # Whisper (openai-whisper, PyTorch CUDA)
 echo "   - openai-whisper (PyTorch CUDA)"

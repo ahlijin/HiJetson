@@ -35,30 +35,28 @@ src/voice/
 | 项目 | 说明 |
 |------|------|
 | 节点名 | `voice_capture` |
-| 输入设备 | Orbbec Astra Pro 内置麦克风 |
-| ALSA 设备 | `card 0: Pro [ASTRA Pro], device 0: USB Audio` |
-| 采样率 | 16000 Hz |
-| 通道 | 2（立体声），自动混音为单声道 |
-| 帧长 | 1600 样本（100ms） |
+| 输入设备 | ReSpeaker Mic Array v2.0 (XVF3000) |
+| ALSA 设备 | `ReSpeaker 4 Mic Array (XFW3000): USB Audio` |
+| 采样率 | 16000 Hz (XVF3000 native 48kHz → 内部重采样) |
+| 通道 | 1（beamformed mono，XVF3000 硬件输出） |
+| 帧长 | 1920 样本（120ms） |
+| 板载处理 | 波束成形 + 自适应降噪 + 去混响 |
 | Python 依赖 | `sounddevice` |
 | 发布话题 | `/voice/audio_raw` (std_msgs/Float32MultiArray) |
 
-**注意：** ASTRA Pro 为 2 通道 USB 音频设备。使用 ALSA 直通（`device=0`）时必须指定 `channels=2`，代码内部自动将双通道混音为单声道后发布。
+**说明：** XVF3000 输出立体声 USB Audio（左 = beamformed mono, 右 = AEC 参考），capture 节点仅取左声道。XVF3000 已做波束成形和降噪，故软件 HPF 默认关闭 (`hp_enable: false`)，如有需要可通过参数开启。
 
-**PulseAudio 冲突：** Jetson 上 PulseAudio 默认占用 USB 音频设备，导致 sounddevice 无法通过 ALSA 直通（`hw:0,0`）访问。需要在启动前临时停止 PulseAudio。
-
-```bash
-systemctl --user stop pulseaudio.service pulseaudio.socket
-```
+**PulseAudio 兼容：** ReSpeaker 走 PulseAudio 默认输入设备 (`device_index: -1`)，无设备占用冲突，无需停止 PulseAudio。
 
 ### 1.2 语音活动检测 (VAD)
 
 | 项目 | 说明 |
 |------|------|
 | 节点名 | `voice_vad` |
-| 方法 | WebRTC VAD |
-| Python 依赖 | `webrtcvad` |
-| 订阅话题 | `/voice/audio_raw` (Float32MultiArray) |
+| 方法 | XVF3000 VOICEACTIVITY 寄存器（硬件 VAD） |
+| Python 依赖 | 无 |
+| 订阅话题 | `/voice/audio_raw` (Float32MultiArray) — 音频数据 |
+| | `/voice/vad_hw` (std_msgs/Bool) — 硬件 VAD 信号 |
 | 发布话题 | `/voice/voice_activity` (std_msgs/Bool) — 是否正在说话 |
 | | `/voice/audio_clip` (Float32MultiArray) — 完整语音片段 |
 
@@ -67,13 +65,13 @@ systemctl --user stop pulseaudio.service pulseaudio.socket
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `sample_rate` | 16000 | 采样率 |
-| `frame_ms` | 30 | VAD 帧长 (ms)，webrtcvad 要求 30ms |
+| `frame_ms` | 30 | VAD 帧长 (ms)，与音频帧对齐 |
 | `silence_timeout` | 0.5 | 静音超时 (秒)，超过后认为语音结束 |
-| `vad_mode` | 1 | 敏感度 0-3，3 最严格 |
+| `vad_mode` | 1 | 敏感度 0-3，3 最严格（旧参数，VAD 节点已移除） |
 
 **工作流程：**
 1. 从 `/voice/audio_raw` 接收 PCM 音频帧
-2. 将 float32 转为 int16 PCM（webrtcvad 要求）
+2. 将 float32 转为 int16 PCM（旧 WebRTC 流程，VAD 节点已使用硬件 VAD 信号）
 3. 每 30ms 帧执行 VAD 检测
 4. 检测到语音开始后缓存音频
 5. 静音持续 `silence_timeout` 秒后，发布完整语音片段
@@ -130,7 +128,41 @@ script_dir=$base/lib/voice_capture
 
 此配置将 develop 模式的脚本安装目录重定向到 `lib/<包名>/`，使 `ros2 run` 能正常找到可执行文件。
 
-### 1.5 启动流程
+### 1.5 DOA 声源定位 (voice_doa)
+
+| 项目 | 说明 |
+|------|------|
+| 节点名 | `voice_doa` |
+| 硬件 | ReSpeaker v2.0 XVF3000 HID 接口 |
+| Python 依赖 | `hidapi` (pip) + `libhidapi-libusb0` (系统) |
+| USB VID:PID | `0x2886:0x0018` (Seeed) |
+| DOA 精度 | 30° 扇区 (0-11) |
+| 发布话题 | `/voice/doa_angle` (std_msgs/Float32) — 角度 0-360° |
+| | `/voice/doa_direction` (std_msgs/String) — 方向标签 |
+
+**数据流：**
+
+```
+XVF3000 USB HID → hidapi/hidraw → voice_doa_node → /voice/doa_angle
+                                                        ↓
+                                              servo_tracker_node
+                                                        ↓
+                                              /servo_controller
+                                                        ↓
+                                              Pi3 STM32 舵机云台
+```
+
+### 1.6 声源跟踪 (servo_tracker)
+
+| 项目 | 说明 |
+|------|------|
+| 节点名 | `servo_tracker` |
+| 包 | `jetauto_app` |
+| 订阅 | `/voice/doa_angle` (Float32) |
+| 发布 | `/servo_controller` (ServosPosition) |
+| 映射 | DOA 0° → center_pulse, ±90° → full range |
+
+### 1.7 启动流程
 
 1. `voice_capture_node` 启动音频流，发布原始音频帧
 2. `voice_vad_node` 接收音频帧，进行 VAD 检测
@@ -239,6 +271,10 @@ builtin_interfaces/Time timestamp
 | `/voice/audio_clip` | `Float32MultiArray` | voice_vad | 完整语音片段 |
 | `/voice/asr_result` | `std_msgs/String` | voice_asr | ASR识别文本 |
 | `/voice/voice_command` | `VoiceCommand` | voice_asr | 结构化语音指令 |
+| `/voice/doa_angle` | `std_msgs/Float32` | voice_doa | 声源方向角度 (0-360°) |
+| `/voice/doa_direction` | `std_msgs/String` | voice_doa | 声源方向标签 |
+| `/voice/vad_hw` | `std_msgs/Bool` | voice_doa | 硬件 VAD 状态 (XVF3000) |
+| `/voice/status_led` | `std_msgs/ColorRGBA` | voice_doa sub | LED 灯环颜色控制 |
 | `/camera/color/image_raw` | `sensor_msgs/Image` | astra_camera | RGB彩色图 |
 | `/camera/depth/image_raw` | `sensor_msgs/Image` | astra_camera | 深度图 |
 | `/vision/preprocessed_image` | `sensor_msgs/Image` | image_preprocess | 预处理后图像 |

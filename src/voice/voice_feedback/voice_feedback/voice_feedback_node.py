@@ -2,24 +2,34 @@
 """
 voice_feedback_node.py
 
-Audio feedback node. Subscribes to wake word and ASR result topics,
-and plays short beep tones through the system's audio output device
-to inform the user of system state changes.
+Multi-modal feedback on wake word / ASR events:
+  - Audio tone  (through speaker / PulseAudio)
+  - Buzzer beep (through STM32 / ros_robot_controller)
+  - LED flash   (ReSpeaker pixel ring)
 
 Subscribes:
-  /voice/wake_word (std_msgs/String) — Plays a rising tone "🔊 listening" beep
-  /voice/asr_result (std_msgs/String) — Plays a confirmation beep when command is recognized
+  /voice/wake_word  (std_msgs/String)  — trigger wake feedback
+  /voice/asr_result (std_msgs/String)  — trigger result beep
+
+Publishes:
+  /ros_robot_controller/set_buzzer  (BuzzerState)  — STM32 buzzer beep
+  /voice/status_led                  (ColorRGBA)    — LED colour flash
 
 Configuration (from voice_params.yaml):
-  ~device_index (int) — Output device index (-1 = default output)
-  ~wake_volume (float) — Volume for wake beep (0.0–1.0, default 0.5)
-  ~result_volume (float) — Volume for result beep (0.0–1.0, default 0.3)
-  ~sample_rate (int) — Output sample rate (default 48000)
+  device_index     (int)   Audio output device (-1 = default)
+  wake_volume      (float) Audio tone volume 0-1  (default 0.5)
+  result_volume    (float) ASR result tone volume (default 0.3)
+  sample_rate      (int)   Output sample rate (default 48000)
+  buzzer_freq      (int)   STM32 buzzer frequency (default 800, lower = quieter)
+  buzzer_on_time   (float) Buzzer on duration sec (default 0.12)
+  led_r/g/b/a      (float) LED flash colour (default 0.0 0.5 1.0 1.0 = cyan)
+  led_duration     (float) LED flash duration sec before restoring trace (default 2.0)
 """
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String
+from std_msgs.msg import String, ColorRGBA
+from ros_robot_controller_msgs.msg import BuzzerState
 import numpy as np
 import sounddevice as sd
 
@@ -28,13 +38,32 @@ class VoiceFeedbackNode(Node):
     def __init__(self):
         super().__init__('voice_feedback')
 
-        # Parameters
+        # ── Audio parameters ──
         self.device_index = self.declare_parameter('device_index', -1).value
         self.wake_volume = self.declare_parameter('wake_volume', 0.5).value
         self.result_volume = self.declare_parameter('result_volume', 0.3).value
         self.sample_rate = self.declare_parameter('sample_rate', 48000).value
 
-        # Subscribers
+        # ── Buzzer parameters ──
+        self.buzzer_freq = self.declare_parameter('buzzer_freq', 800).value
+        self.buzzer_on_time = self.declare_parameter('buzzer_on_time', 0.12).value
+
+        # ── LED parameters ──
+        self._led_r = self.declare_parameter('led_r', 0.0).value
+        self._led_g = self.declare_parameter('led_g', 0.5).value
+        self._led_b = self.declare_parameter('led_b', 1.0).value
+        self._led_a = self.declare_parameter('led_a', 1.0).value
+        self._led_duration = self.declare_parameter('led_duration', 2.0).value
+
+        # ── Publishers ──
+        self._buzzer_pub = self.create_publisher(
+            BuzzerState, '/ros_robot_controller/set_buzzer', 1
+        )
+        self._led_pub = self.create_publisher(
+            ColorRGBA, '/voice/status_led', 1
+        )
+
+        # ── Subscribers ──
         self._ww_sub = self.create_subscription(
             String, '/voice/wake_word', self.wake_word_callback, 10
         )
@@ -43,24 +72,56 @@ class VoiceFeedbackNode(Node):
         )
 
         self.get_logger().info(
-            f'VoiceFeedbackNode started: device={self.device_index}, '
-            f'wake_vol={self.wake_volume}, result_vol={self.result_volume}'
+            f'VoiceFeedbackNode started: '
+            f'buzzer={self.buzzer_freq}Hz/{self.buzzer_on_time}s, '
+            f'led=({self._led_r},{self._led_g},{self._led_b})/{self._led_duration}s'
         )
 
+    # ── Feedback on wake word ──────────────────────────────────
+
+    def wake_word_callback(self, msg: String):
+        self.get_logger().info(f'🔊 Wake word feedback: "{msg.data}"')
+
+        # 1) Audio tone through speaker
+        self._play_tone(
+            frequencies=[800, 1200],
+            durations=[0.15, 0.15],
+            volume=self.wake_volume,
+        )
+
+        # 2) STM32 buzzer beep (quiet — low freq away from resonance)
+        buzzer_msg = BuzzerState()
+        buzzer_msg.freq = self.buzzer_freq
+        buzzer_msg.on_time = self.buzzer_on_time
+        buzzer_msg.off_time = 0.01
+        buzzer_msg.repeat = 1
+        self._buzzer_pub.publish(buzzer_msg)
+
+        # 3) LED flash (cyan by default)
+        led_msg = ColorRGBA()
+        led_msg.r = self._led_r
+        led_msg.g = self._led_g
+        led_msg.b = self._led_b
+        led_msg.a = self._led_a
+        self._led_pub.publish(led_msg)
+
+    # ── Feedback on ASR result ─────────────────────────────────
+
+    def asr_result_callback(self, msg: String):
+        self.get_logger().debug(f'ASR result feedback: "{msg.data}"')
+        self._play_tone(
+            frequencies=[1000],
+            durations=[0.1],
+            volume=self.result_volume,
+        )
+
+    # ── Audio tone helper ──────────────────────────────────────
+
     def _play_tone(self, frequencies, durations, volume=0.5):
-        """
-        Generate and play a multi-tone sequence.
-        
-        Args:
-            frequencies: List of frequencies in Hz for each segment
-            durations: List of durations in seconds for each segment
-            volume: Amplitude multiplier (0.0–1.0)
-        """
         try:
             segments = []
             for freq, dur in zip(frequencies, durations):
                 t = np.linspace(0, dur, int(self.sample_rate * dur), endpoint=False)
-                # Sine wave with fade-in/out to avoid click
                 envelope = np.ones_like(t)
                 fade_len = min(int(0.02 * self.sample_rate), len(t) // 4)
                 if fade_len > 0:
@@ -70,33 +131,10 @@ class VoiceFeedbackNode(Node):
                 segments.append(segment)
 
             audio = np.concatenate(segments).astype(np.float32)
-
-            # Play through output device
-            sd.play(audio, samplerate=self.sample_rate, device=self.device_index if self.device_index >= 0 else None)
-            # Don't block — let it play asynchronously
-
+            sd.play(audio, samplerate=self.sample_rate,
+                    device=self.device_index if self.device_index >= 0 else None)
         except Exception as e:
             self.get_logger().warning(f'Failed to play audio: {e}', throttle_duration_sec=10.0)
-
-    def wake_word_callback(self, msg: String):
-        """Wake word detected — play a rising two-tone beep (like "listening" feedback)."""
-        self.get_logger().info(f'🔊 Wake word feedback: "{msg.data}"')
-        # Rising tone: 800Hz → 1200Hz, 150ms each
-        self._play_tone(
-            frequencies=[800, 1200],
-            durations=[0.15, 0.15],
-            volume=self.wake_volume,
-        )
-
-    def asr_result_callback(self, msg: String):
-        """ASR result received — play a short confirmation beep."""
-        self.get_logger().debug(f'ASR result feedback: "{msg.data}"')
-        # Short single tone: 1000Hz, 100ms
-        self._play_tone(
-            frequencies=[1000],
-            durations=[0.1],
-            volume=self.result_volume,
-        )
 
 
 def main(args=None):

@@ -53,7 +53,7 @@ sleep 1
 # 启动 VAD
 echo ">>> [3] 启动语音活动检测 (VAD)..."
 ros2 run voice_vad voice_vad_node \
-    --ros-args -p sample_rate:=16000 -p vad_mode:=1 &
+    --ros-args -p sample_rate:=16000 &
 VAD_PID=$!
 sleep 1
 

@@ -1,20 +1,24 @@
 # 语音模块参数配置
+#
+# 麦克风: ReSpeaker Mic Array v2.0 (XVF3000)
+#   - USB Audio, beamformed mono 输出
+#   - 板载波束成形 + 降噪 + 去混响
+#   - 自动走 PulseAudio 默认输入设备 (device_index: -1)
 
 voice_capture:
   ros__parameters:
     sample_rate: 16000
     frame_size: 1920      # 120ms, 与 VAD 30ms 对齐 (480×4)
-    device_index: -1        # -1 = PulseAudio 默认输入 (通过PA管理ASTRA Pro, 无冲突)
-    channels: 1           # 单声道直采
-    hp_cutoff: 300        # 高通滤波，去除 Jetson 风扇噪声
+    device_index: -1        # -1 = PulseAudio 默认输入
+    channels: 1             # XVF3000 输出 beamformed 单声道
+    hp_enable: false        # XVF3000 板载降噪，无需软件高通
+    hp_cutoff: 300
 
 voice_vad:
   ros__parameters:
     sample_rate: 16000
     frame_ms: 30
     silence_timeout: 0.5
-    vad_mode: 3            # 0=最低 3=最严格
-    min_energy: 0.015      # RMS能量门限，过滤环境噪声
 
 voice_wake_word:
   ros__parameters:
@@ -25,10 +29,19 @@ voice_wake_word:
 
 voice_feedback:
   ros__parameters:
-    device_index: -1        # -1 = 默认输出设备 (PulseAudio 路由到当前默认音频输出，如蓝牙音箱)
-    wake_volume: 0.5        # 唤醒提示音量 (0.0-1.0)
-    result_volume: 0.3      # 识别结果提示音量 (0.0-1.0)
+    device_index: -1        # -1 = 默认输出设备 (PulseAudio)
+    wake_volume: 0.5        # 扬声器提示音音量 (0.0-1.0)
+    result_volume: 0.3      # 识别结果提示音音量 (0.0-1.0)
     sample_rate: 48000
+    # STM32 蜂鸣器（800Hz 远离谐振点，比默认 1900 安静很多）
+    buzzer_freq: 800        # 蜂鸣器频率 (Hz)，越低越轻
+    buzzer_on_time: 0.12    # 蜂鸣时长 (秒)
+    # LED 灯环反馈色
+    led_r: 0.0              # 红 0-1
+    led_g: 0.5              # 绿 0-1
+    led_b: 1.0              # 蓝 0-1
+    led_a: 1.0              # 透明度 0-1
+    led_duration: 2.0       # LED 闪亮时长 (秒)，后恢复 DOA trace
 
 voice_asr:
   ros__parameters:
@@ -39,3 +52,14 @@ voice_asr:
     hp_cutoff: 300         # 高通滤波，去除 Jetson 风扇噪声
     wake_word_enabled: True
     wake_word_timeout: 5.0
+
+voice_doa:
+  ros__parameters:
+    poll_rate: 10           # DOA 轮询频率 (Hz)
+    doa_vid: 10374          # USB vendor ID  (0x2886 = Seeed)
+    doa_pid: 24             # USB product ID (0x0018)
+    angle_offset: 0.0       # 安装偏移量 (度)，正数=顺时针
+    no_doa_value: 12        # XVF3000 报告无方向时的值 (仅 HID 后端)
+    backend: "auto"         # pyusb / hidapi / hidraw / auto
+    led_enable: true        # LED 灯环开关
+    led_brightness: 20      # LED 亮度 0-255

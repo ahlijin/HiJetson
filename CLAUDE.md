@@ -1,6 +1,6 @@
 # HiJetson — Jetson Orin Nano 机器人感知与控制
 
-基于 NVIDIA Jetson Orin Nano 8GB 平台，配合 Orbbec Astra Pro 深度相机的机器人端工作空间。
+基于 NVIDIA Jetson Orin Nano 8GB 平台，配合 Orbbec Astra Pro 深度相机 + ReSpeaker Mic Array v2.0 的机器人端工作空间。
 集成视觉感知、语音交互、SLAM 建图和自主导航。
 
 ## 分支说明
@@ -10,6 +10,7 @@
 ## 硬件平台
 - **核心计算**: NVIDIA Jetson Orin Nano 8GB (JetPack R36.5.0, Ubuntu 22.04)
 - **深度相机**: Orbbec Astra Pro (RGB 1080P + Depth 640×480)
+- **麦克风阵列**: ReSpeaker Mic Array v2.0 (XVF3000, USB Audio + HID DOA, 板载波束成形+降噪)
 - **底层**: CUDA 12.6 + TensorRT 10.7 + ROS2 Humble
 - **通信**: ROS_DOMAIN_ID=42, 与 Pi3 协同
 
@@ -17,7 +18,7 @@
 ```
 HiJetson/
 ├── src/
-│   ├── voice/               # 语音模块 (capture → VAD → wake_word → ASR)
+│   ├── voice/               # 语音模块 (capture → VAD → wake_word → ASR, ReSpeaker v2.0 XVF3000)
 │   ├── vision/              # 视觉模块 (depth_processor + 待补 object_detection)
 │   ├── fusion/              # 多模态融合节点
 │   ├── slam/                # SLAM (slam_toolbox + rtabmap)

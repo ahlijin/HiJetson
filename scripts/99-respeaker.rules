@@ -1,0 +1,22 @@
+# ReSpeaker Mic Array v2.0 (XVF3000) — udev rules
+#
+# Allows non-root access to the XVF3000 HID interface for DOA reading,
+# and USB device access for vendor control transfers (pyusb backend).
+#
+# Install:
+#   sudo cp 99-respeaker.rules /etc/udev/rules.d/
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# VID:PID combinations:
+#   2886:0018  Seeed Studio ReSpeaker v2.0 (common)
+#   20b1:0005  XMOS XVF3000 reference firmware
+#
+
+# Seeed ReSpeaker v2.0 — raw USB (pyusb backend)
+SUBSYSTEM=="usb", ATTRS{idVendor}=="2886", ATTRS{idProduct}=="0018", MODE="0666", GROUP="dialout"
+
+# Seeed ReSpeaker v2.0 — hidraw (hidapi/hidraw backend)
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="2886", ATTRS{idProduct}=="0018", MODE="0666", GROUP="dialout"
+
+# XMOS XVF3000 reference — hidraw backup
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="20b1", ATTRS{idProduct}=="0005", MODE="0666", GROUP="dialout"

@@ -3,12 +3,13 @@
 <package format="3">
   <name>voice_feedback</name>
   <version>0.0.1</version>
-  <description>Audio feedback node - plays beeps on wake word detection and ASR result</description>
+  <description>Multi-modal feedback node — audio tone + STM32 buzzer + LED ring on wake word</description>
   <maintainer email="ahlijin@163.com">legend</maintainer>
   <license>Apache-2.0</license>
 
   <depend>rclpy</depend>
   <depend>std_msgs</depend>
+  <depend>ros_robot_controller_msgs</depend>
 
   <export>
     <build_type>ament_python</build_type>

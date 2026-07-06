@@ -14,7 +14,7 @@ setup(
     zip_safe=True,
     maintainer='legend',
     maintainer_email='ahlijin@163.com',
-    description='Voice activity detection using webrtcvad',
+    description='Voice activity detection node (XVF3000 hardware VAD)',
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={

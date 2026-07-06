@@ -1,10 +1,10 @@
 from setuptools import setup
 
-package_name = 'voice_capture'
+package_name = 'voice_doa'
 
 setup(
     name=package_name,
-    version='0.0.1',
+    version='0.1.0',
     packages=[package_name],
     data_files=[
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
@@ -14,12 +14,12 @@ setup(
     zip_safe=True,
     maintainer='legend',
     maintainer_email='ahlijin@163.com',
-    description='Audio capture node for ReSpeaker Mic Array v2.0 (XVF3000)',
+    description='DOA node for ReSpeaker Mic Array v2.0 (XVF3000) via USB HID',
     license='Apache-2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'voice_capture_node = voice_capture.voice_capture_node:main',
+            'voice_doa_node = voice_doa.voice_doa_node:main',
         ],
     },
 )

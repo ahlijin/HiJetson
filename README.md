@@ -1,16 +1,18 @@
-# HiJetson — Jetson Orin Nano × Orbbec Astra Pro 多模态感知系统
+# HiJetson — Jetson Orin Nano × Orbbec Astra Pro + ReSpeaker 多模态感知系统
+
+HiJetson 是一个基于 **NVIDIA Jetson Orin Nano 8G** 平台，配合 **Orbbec Astra Pro** 深度相机和 **ReSpeaker Mic Array v2.0** 的多模态感知系统。项目集成**语音采集/识别**与**图像采集/识别**两个核心功能模块，为机器人、智能监控、边缘 AI 等场景提供完整的感知解决方案。
 
 ## 项目概述
 
-HiJetson 是一个基于 **NVIDIA Jetson Orin Nano 8G** 平台，配合 **Orbbec Astra Pro** 深度相机的多模态感知系统。项目集成**语音采集/识别**与**图像采集/识别**两个核心功能模块，为机器人、智能监控、边缘 AI 等场景提供完整的感知解决方案。
+HiJetson 是一个基于 **NVIDIA Jetson Orin Nano 8G** 平台，配合 **Orbbec Astra Pro** 深度相机和 **ReSpeaker Mic Array v2.0** 的多模态感知系统。项目集成**语音采集/识别**与**图像采集/识别**两个核心功能模块，为机器人、智能监控、边缘 AI 等场景提供完整的感知解决方案。
 
 ## 硬件平台
 
 | 组件 | 型号 | 说明 |
 |------|------|------|
 | 核心计算平台 | NVIDIA Jetson Orin Nano 8GB | Ampere GPU (1024 CUDA cores, 32 Tensor Cores), 6核 ARM Cortex-A78AE CPU, 40 TOPS AI算力 |
-| 深度相机 | Orbbec Astra Pro | RGB 1080P + Depth 640×480 + IR，内置单声道麦克风，支持结构光深度感知 |
-| 麦克风 | Orbbec Astra Pro 内置麦克风 | USB Audio 设备，ALSA card 0，2通道立体声，支持 16kHz 采样 |
+| 深度相机 | Orbbec Astra Pro | RGB 1080P + Depth 640×480 + IR，支持结构光深度感知 |
+| 麦克风阵列 | ReSpeaker Mic Array v2.0 | XVF3000 USB Audio，板载波束成形+降噪+去混响 |
 | 存储 | NVMe SSD 233GB | `/dev/nvme0n1p1` |
 
 ## 环境软件栈
@@ -41,7 +43,7 @@ HiJetson 是一个基于 **NVIDIA Jetson Orin Nano 8G** 平台，配合 **Orbbec
 │  │                     │    │                             │  │
 │  │  ┌───────────────┐  │    │  ┌───────────────────────┐ │  │
 │  │  │ 音频采集节点    │  │    │  │ 相机驱动节点          │ │  │
-│  │  │ (ASTRA Pro麦克风)│  │    │  │ (ros2_astra_camera)  │ │  │
+│  │  │ (ReSpeaker v2.0)│  │    │  │ (ros2_astra_camera)  │ │  │
 │  │  └───────┬───────┘  │    │  └────────┬──────────────┘ │  │
 │  │     ┌────┴────┐     │    │           │                │  │
 │  │     │         │     │    │  ┌────────▼──────────────┐ │  │
@@ -123,7 +125,7 @@ cd /home/nvidia/HiJetson
 bash scripts/run_voice.sh
 ```
 
-脚本自动暂停 PulseAudio → 启动节点 → 退出后恢复。
+脚本控制 PulseAudio 默认输入设备指向 ReSpeaker → 启动节点 → 停止后恢复。
 
 **唤醒词模式**：说 "Hey Jarvis" 唤醒，唤醒后 5s 内说话会被转写。如需关闭唤醒词直接 ASR，编辑 `src/config/voice_params.yaml`，设 `voice_asr.wake_word_enabled: False`。
 
@@ -169,7 +171,7 @@ capture → /voice/audio_raw
 - [x] 语音采集节点开发 (voice_capture)
 - [x] VAD 节点开发 (voice_vad)
 - [x] ASR 节点开发 - openai-whisper CUDA (voice_asr)
-- [x] 语音管线修复与性能调优（PulseAudio冲突/VAD误触发/高通滤波）
+- [x] 语音管线修复与性能调优（VAD误触发/高通滤波/ReSpeaker适配）
 - [x] 唤醒词检测节点开发 (voice_wake_word, OpenWakeWord)
 - [ ] 图像预处理节点开发 (image_preprocess)
 - [ ] YOLOv8 + ONNX Runtime 检测节点开发 (object_detection)
@@ -186,7 +188,7 @@ capture → /voice/audio_raw
 - [YOLOv8 - Ultralytics](https://github.com/ultralytics/ultralytics)
 - [OpenAI Whisper](https://github.com/openai/whisper)
 - [OpenWakeWord](https://github.com/dscripka/openWakeWord)
-- [WebRTC VAD](https://github.com/wiseman/py-webrtcvad)
+- [ReSpeaker Mic Array v2.0](https://wiki.seeedstudio.com/ReSpeaker_Mic_Array_v2.0/)
 
 ## 许可证
 

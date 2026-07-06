@@ -24,6 +24,7 @@ setup(
     entry_points={
         'console_scripts': [
             'lidar_controller = jetauto_app.lidar_controller:main',
+            'servo_tracker = jetauto_app.servo_tracker:main',
         ],
     },
 )

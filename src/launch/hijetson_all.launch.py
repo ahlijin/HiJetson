@@ -76,6 +76,16 @@ def generate_launch_description():
                 arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
                 output='screen',
             ),
+
+            # 声源定位 (XVF3000 DOA)
+            Node(
+                package='voice_doa',
+                executable='voice_doa_node',
+                name='voice_doa',
+                parameters=[config_file],
+                arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+                output='screen',
+            ),
         ]),
 
         # ===== 视觉模块 =====
@@ -132,6 +142,25 @@ def generate_launch_description():
             executable='fusion_node',
             name='fusion_node',
             parameters=[],
+            arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+            output='screen',
+        ),
+
+        # ===== 行为模块 =====
+        # 声源跟踪：DOA → 舵机云台
+        Node(
+            package='jetauto_app',
+            executable='servo_tracker',
+            name='servo_tracker',
+            parameters=[{
+                'servo_pan_id': 1,
+                'center_pulse': 1500,
+                'range_pulse': 1000,
+                'angle_range': 180.0,
+                'invert': False,
+                'center_timeout': 2.0,
+                'rate': 20.0,
+            }],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
             output='screen',
         ),

@@ -16,13 +16,13 @@ if os.name != 'nt':
 LIN_VEL = 0.25
 ANG_VEL = 1.0
 
-msg = """
+msg = """\
 Control Your Robot from Jetson!
 ---------------------------
   w
 a  s  d   q/e rotate
-  x
-Press and hold to move, release to stop
+  x (brake)
+WASD move, hold to go, release to stop
 CTRL-C to quit
 """
 
@@ -64,7 +64,7 @@ class TeleopControl(Node):
             moving = True
             if key == 'w':
                 twist.linear.x = LIN_VEL
-            elif key == 'x':
+            elif key == 's':
                 twist.linear.x = -LIN_VEL
             elif key == 'a':
                 twist.linear.y = LIN_VEL
@@ -74,6 +74,13 @@ class TeleopControl(Node):
                 twist.angular.z = ANG_VEL
             elif key == 'e':
                 twist.angular.z = -ANG_VEL
+            elif key == 'x':
+                twist.linear.x = 0.0
+                twist.linear.y = 0.0
+                twist.angular.z = 0.0
+                self.cmd_vel.publish(twist)
+                rclpy.spin_once(self, timeout_sec=0.1)
+                moving = True  # keep publish path, emergency brake
             else:
                 moving = False
 

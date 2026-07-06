@@ -2,14 +2,21 @@
 """
 voice_capture_node.py
 
-Captures audio from the Astra Pro microphone via sounddevice.
-Publishes raw audio frames to /voice/audio_raw as std_msgs/Float32MultiArray.
+Captures audio via sounddevice and publishes raw frames to /voice/audio_raw.
+
+Hardware:
+  - ReSpeaker Mic Array v2.0 (XVF3000): USB Audio, beamformed mono output,
+    onboard noise suppression + dereverberation. HPF disabled by default.
+  - Falls back to any PulseAudio/ALSA device via device_index.
 
 Configuration:
   ~sample_rate (int): Sample rate in Hz (default: 16000)
   ~frame_size (int): Samples per frame (default: 1600)  # 100ms at 16kHz
   ~device_index (int): ALSA/PulseAudio device index (-1 = default)
-  ~channels (int): Number of input channels (default: 1, set 2 for stereo devices like ASTRA Pro)
+  ~channels (int): Number of input channels (default: 1)
+  ~hp_cutoff (int): High-pass filter cutoff in Hz (default: 300)
+  ~hp_enable (bool): Enable software high-pass filter (default: false).
+                     Set true for mics without onboard HPF.
 """
 
 import rclpy
@@ -28,19 +35,23 @@ class VoiceCaptureNode(Node):
         self.frame_size = self.declare_parameter('frame_size', 1600).value
         self.device_index = self.declare_parameter('device_index', -1).value
         self.channels = self.declare_parameter('channels', 1).value
+        self.hp_enable = self.declare_parameter('hp_enable', False).value
 
         self.publisher_ = self.create_publisher(Float32MultiArray, '/voice/audio_raw', 10)
         self.buffer = np.zeros((0,), dtype=np.float32)
 
-        # 高通滤波器：去除 Jetson 风扇低频噪声 (139Hz)
-        self.hp_cutoff = self.declare_parameter('hp_cutoff', 300).value
-        self._hp_sos = butter(4, self.hp_cutoff, btype='high', fs=self.sample_rate, output='sos')
+        # 高通滤波器：去除 Jetson 风扇低频噪声 (默认关闭，XVF3000 板载已完成降噪)
+        self._hp_sos = None
+        if self.hp_enable:
+            self.hp_cutoff = self.declare_parameter('hp_cutoff', 300).value
+            self._hp_sos = butter(4, self.hp_cutoff, btype='high', fs=self.sample_rate, output='sos')
 
         device = None if self.device_index < 0 else self.device_index
 
         self.get_logger().info(
             f'VoiceCaptureNode started: {self.sample_rate}Hz, '
-            f'{self.frame_size} samples/frame, device={device}, ch={self.channels}'
+            f'{self.frame_size} samples/frame, device={device}, ch={self.channels}, '
+            f'hp_enable={self.hp_enable}'
         )
 
         # Start audio stream
@@ -70,8 +81,9 @@ class VoiceCaptureNode(Node):
         else:
             audio = indata.flatten().astype(np.float32)
 
-        # 高通滤波去除 Jetson 风扇低频噪声
-        audio = sosfilt(self._hp_sos, audio).astype(np.float32)
+        # 高通滤波：仅 hp_enable=True 时开启 (XVF3000 板载已完成降噪)
+        if self._hp_sos is not None:
+            audio = sosfilt(self._hp_sos, audio).astype(np.float32)
 
         msg = Float32MultiArray()
         msg.layout.dim.append(MultiArrayDimension(

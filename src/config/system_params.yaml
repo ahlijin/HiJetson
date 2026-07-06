@@ -13,8 +13,9 @@ sensors:
     color_height: 720
     fps: 30
   microphone:
-    device: "default"
+    device: "respeaker_xvf3000"
     sample_rate: 16000
+    board_processing: "beamforming + ns + dereverb"
 
 topics:
   audio_raw: "/voice/audio_raw"
