@@ -327,3 +327,52 @@ rm -rf build/ install/ log/
 # 或使用清理脚本
 ./scripts/clean.sh
 ```
+
+### ASR 独立测试脚本
+
+项目提供了一个独立测试脚本 `scripts/respeaker_asr_test.py`，不依赖 ROS2 即可测试 ReSpeaker 唤醒词 + 语音识别：
+
+#### 工作流程
+
+```
+○ 睡眠模式（高阈值，只检测"hey jarvis"）
+   ↓ 说 "hey jarvis"
+🔊 唤醒
+▪▫ 聆听模式（低阈值，whisper base 识别）
+   ↓ 说任何话
+→ 识别结果文字
+   ↓ 静音 8 秒
+💤 自动回到睡眠
+```
+
+#### 使用方式
+
+```bash
+# 1. 设置权限（仅首次）
+sudo bash scripts/setup_respeaker.sh
+
+# 2. 运行
+python3 scripts/respeaker_asr_test.py
+
+# 3. 说 "hey jarvis" 唤醒后直接对话
+```
+
+#### 参数调整
+
+脚本顶部可调关键参数：
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `WAKE_THRESHOLD` | 0.035 | 唤醒前能量阈值，调高减少误触发 |
+| `WAKE_SCORE` | 0.5 | 唤醒词置信度门限 |
+| `ASR_THRESHOLD` | 0.015 | 唤醒后语音检测阈值，调低更灵敏 |
+| `ASR_SILENCE_TIMEOUT` | 0.8s | 沉默多久=句子结束 |
+| `ASR_COOLDOWN` | 2.0s | 两次识别最小间隔 |
+| `WAKE_TIMEOUT` | 8.0s | 唤醒后无语音自动睡眠 |
+| `ASR_MODEL_SIZE` | base | tiny(快)/base(准)/small(更准) |
+
+#### 依赖
+
+```bash
+pip3 install sounddevice numpy scipy openai-whisper openwakeword
+```

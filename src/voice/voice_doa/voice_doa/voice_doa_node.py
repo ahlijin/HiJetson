@@ -35,7 +35,7 @@ Parameters (~voice_doa):
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32, String, Bool, ColorRGBA
-from example_interfaces.srv import SetString  # for set_param, get_param
+from voice_msgs.srv import Param  # for set_param, get_param
 
 import struct
 import time
@@ -372,10 +372,10 @@ class VoiceDOANode(Node):
 
         # ── Parameter tuning services ──
         self._srv_set = self.create_service(
-            SetString, '/voice/respeaker_set_param', self._set_param_cb
+            Param, '/voice/respeaker_set_param', self._set_param_cb
         )
         self._srv_get = self.create_service(
-            SetString, '/voice/respeaker_get_param', self._get_param_cb
+            Param, '/voice/respeaker_get_param', self._get_param_cb
         )
 
         # ── Timer ──

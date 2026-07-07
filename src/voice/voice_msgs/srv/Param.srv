@@ -1,0 +1,3 @@
+string data  # Request: 'HPFONOFF=2' for set, 'HPFONOFF' for get
+---
+string message  # Response: 'ok' for success, value for get, error message

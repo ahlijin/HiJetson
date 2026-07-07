@@ -105,6 +105,9 @@ HiJetson/
 │   └── launch/                    # ROS2 启动文件
 ├── scripts/                       # 部署 & 启动脚本
 │   ├── setup_jetson.sh            # 一键环境安装
+│   ├── setup_respeaker.sh         # ReSpeaker 权限设置
+│   ├── 99-respeaker.rules         # ReSpeaker udev 规则
+│   ├── respeaker_asr_test.py      # 唤醒词+ASR 独立测试
 │   ├── run_voice.sh               # 语音模块启动
 │   ├── run_vision.sh              # 视觉模块启动
 │   └── clean.sh                   # 清理
