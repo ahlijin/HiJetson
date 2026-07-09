@@ -18,7 +18,7 @@
 ```
 HiJetson/
 ├── src/
-│   ├── voice/               # 语音模块 (capture → VAD → wake_word → ASR, ReSpeaker v2.0 XVF3000)
+│   ├── voice/               # 语音模块 (capture → VAD → ASR, 能量VAD + Whisper + opencc)
 │   ├── vision/              # 视觉模块 (depth_processor + 待补 object_detection)
 │   ├── fusion/              # 多模态融合节点
 │   ├── slam/                # SLAM (slam_toolbox + rtabmap)

@@ -30,14 +30,10 @@ class VoiceCaptureNode(Node):
             self.stream = None
             return
 
-        # Use PulseAudio default (works around Jetson PortAudio channel bug)
-        # Default source must be set: pactl set-default-source alsa_input.xxx
-        pa_device = None  # None = PulseAudio default
-
+        # ALSA direct (same as continuous script)
         self.get_logger().info(
             f'VoiceCaptureNode started: {self.sample_rate}Hz, '
-            f'{self.frame_size} samples/frame, device=PulseAudio (ReSpeaker@idx={device_idx}), '
-            f'hp_enable=False'
+            f'{self.frame_size} samples/frame, device={device_idx} (ALSA direct)'
         )
 
         try:
@@ -45,7 +41,7 @@ class VoiceCaptureNode(Node):
                 samplerate=self.sample_rate,
                 channels=1,
                 blocksize=self.frame_size,
-                device=pa_device,
+                device=device_idx,
                 dtype='float32',
                 callback=self.audio_callback,
             )
