@@ -66,7 +66,10 @@ class VoiceVADNode(Node):
             frame = audio[i:i + self.frame_samples]
             if len(frame) < self.frame_samples:
                 continue
-            self._feed(self._hw_vad, frame)
+            # 能量 VAD：RMS > 阈值即视为有声（10x增益后噪声~0.01，语音~0.15+）
+            frame_rms = np.sqrt(np.mean(frame ** 2))
+            is_speech = frame_rms > 0.03
+            self._feed(is_speech, frame)
 
         self._publish_activity()
 

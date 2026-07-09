@@ -85,6 +85,9 @@ class VoiceCaptureNode(Node):
         if self._hp_sos is not None:
             audio = sosfilt(self._hp_sos, audio).astype(np.float32)
 
+        # 软件增益：补偿 ReSpeaker 低电平
+        audio = audio * 10.0
+
         msg = Float32MultiArray()
         msg.layout.dim.append(MultiArrayDimension(
             label='samples', size=len(audio), stride=1
