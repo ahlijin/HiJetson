@@ -38,9 +38,9 @@ def generate_launch_description():
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
         ),
         Node(
-            package='voice_wake_word',
-            executable='voice_wake_word_node',
-            name='voice_wake_word',
+            package='voice_hotword',
+            executable='voice_hotword_node',
+            name='voice_hotword',
             output='screen',
             parameters=[config_file],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],

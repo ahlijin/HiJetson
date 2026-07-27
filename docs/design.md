@@ -2,28 +2,83 @@
 
 ## 1. 语音采集与识别模块 (Voice Module)
 
-语音模块由四个 ROS2 包组成，位于 `src/voice/` 目录下。
+语音模块由以下 ROS2 包组成，位于 `src/voice/` 目录下：
+
+| 包 | 类型 | 说明 |
+|----|------|------|
+| `voice_capture` | ament_python | ALSA 音频采集（sounddevice） |
+| `voice_vad` | ament_python | 能量 VAD 分割音频 |
+| `voice_hotword` | ament_python | 热词匹配 + 指令路由（Vosk NFST） |
+| `voice_asr` | ament_python | Whisper 本地转录（GPU） |
+| `voice_feedback` | ament_python | 蜂鸣器/LED 反馈 |
+| `voice_doa` | ament_python | 声源定位 |
+| `voice_msgs` | ament_cmake | 自定义消息 |
+
+### 架构总览
+
+语音识别分三级流水线，每级开销递增：
+
+```
+voice_capture → voice_vad → voice_hotword
+                                   │
+                    ┌──────────────┼────────────────┐
+                    │ 15个热词命中   │ "小车小车"命中    │ 无匹配
+                    ▼              ▼                 ▼
+              直接执行指令     唤醒 + 5s超时    voice_asr(Whisper)
+                                    │                 │
+                                    ▼                 ▼
+                               /voice/wake      /voice/asr_result
+                                    │                 │
+                                    └─────┬───────────┘
+                                          │ (回 hotword 做文本二次匹配)
+                                          ▼
+                                    ┌──────────┐
+                                    │ 匹配→指令  │
+                                    │ 不匹配→丢弃│ (LLM 暂未实现)
+                                    └──────────┘
+```
+
+| 级别 | 触发条件 | GPU | 延迟 |
+|------|---------|-----|------|
+| **热词级** | Vosk 匹配 15 个预定义短语 | ❌ | <50ms |
+| **Whisper** | 唤醒态下 Vosk 未命中 → 转录 | ✅ | ~300ms |
+| **LLM 云端** | 暂未实现，预留接口 | ❌ | - |
 
 ### 目录结构
 
 ```
 src/voice/
-├── voice_capture/          # 音频采集
+├── voice_capture/          # 音频采集 (不变)
 │   ├── setup.py / setup.cfg
 │   ├── package.xml
 │   └── voice_capture/
 │       └── voice_capture_node.py
-├── voice_vad/              # 语音活动检测
+├── voice_vad/              # 语音活动检测 (不变)
 │   ├── setup.py / setup.cfg
 │   ├── package.xml
 │   └── voice_vad/
 │       └── voice_vad_node.py
-├── voice_asr/              # 语音识别
+├── voice_hotword/          # 热词匹配 + 指令路由 (新增)
+│   ├── setup.py / setup.cfg
+│   ├── package.xml
+│   └── voice_hotword/
+│       └── voice_hotword_node.py
+├── voice_asr/              # Whisper 转录 (精简: 移除唤醒/指令/蜂鸣)
 │   ├── setup.py / setup.cfg
 │   ├── package.xml
 │   └── voice_asr/
 │       └── voice_asr_node.py
-└── voice_msgs/             # 自定义消息
+├── voice_feedback/         # 蜂鸣器/LED 反馈 (稍改: 订阅 /voice/state)
+│   ├── setup.py / setup.cfg
+│   ├── package.xml
+│   └── voice_feedback/
+│       └── voice_feedback_node.py
+├── voice_doa/              # 声源定位 (不变)
+│   ├── setup.py / setup.cfg
+│   ├── package.xml
+│   └── voice_doa/
+│       └── voice_doa_node.py
+└── voice_msgs/             # 自定义消息 (不变)
     ├── CMakeLists.txt
     ├── package.xml
     └── msg/
@@ -52,12 +107,11 @@ src/voice/
 
 | 项目 | 说明 |
 |------|------|
-| 节点名 | `voice_vad` |
-| 方法 | XVF3000 VOICEACTIVITY 寄存器（硬件 VAD） |
-| Python 依赖 | 无 |
-| 订阅话题 | `/voice/audio_raw` (Float32MultiArray) — 音频数据 |
-| | `/voice/vad_hw` (std_msgs/Bool) — 硬件 VAD 信号 |
-| 发布话题 | `/voice/voice_activity` (std_msgs/Bool) — 是否正在说话 |
+| 节点名 | `voice_vad_node` |
+| 方法 | 能量 VAD (RMS > 0.02) |
+| Python 依赖 | `numpy` |
+| 订阅话题 | `/voice/audio_raw` (Float32MultiArray) |
+| 发布话题 | `/voice/voice_activity` (std_msgs/Bool) |
 | | `/voice/audio_clip` (Float32MultiArray) — 完整语音片段 |
 
 **参数：**
@@ -65,41 +119,98 @@ src/voice/
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
 | `sample_rate` | 16000 | 采样率 |
-| `frame_ms` | 30 | VAD 帧长 (ms)，与音频帧对齐 |
+| `frame_ms` | 30 | VAD 帧长 (ms) |
 | `silence_timeout` | 0.5 | 静音超时 (秒)，超过后认为语音结束 |
-| `vad_mode` | 1 | 敏感度 0-3，3 最严格（旧参数，VAD 节点已移除） |
 
 **工作流程：**
 1. 从 `/voice/audio_raw` 接收 PCM 音频帧
-2. 将 float32 转为 int16 PCM（旧 WebRTC 流程，VAD 节点已使用硬件 VAD 信号）
-3. 每 30ms 帧执行 VAD 检测
-4. 检测到语音开始后缓存音频
-5. 静音持续 `silence_timeout` 秒后，发布完整语音片段
-6. 实时推送 `/voice/voice_activity` 状态
+2. 每 30ms 帧计算 RMS
+3. RMS > 0.02 → 说话中，缓存音频
+4. 静音持续 `silence_timeout` 秒后，发布完整语音片段到 `/voice/audio_clip`
 
-### 1.3 语音识别 (ASR)
+### 1.3 热词匹配 (voice_hotword **新增**)
 
 | 项目 | 说明 |
 |------|------|
-| 节点名 | `voice_asr` |
-| 引擎 | **openai-whisper** (PyTorch, GPU 加速) |
-| 模型 | `tiny`（默认）/ `base` / `small` |
-| 设备 | CUDA (GPU: Orin) |
-| Python 依赖 | `openai-whisper`, `numba` |
-| 订阅话题 | `/voice/audio_clip` (Float32MultiArray) |
-| 发布话题 | `/voice/asr_result` (std_msgs/String) — 识别文本 |
-| | `/voice/voice_command` (voice_msgs/VoiceCommand) — 结构化指令 |
+| 节点名 | `voice_hotword` |
+| 引擎 | **Vosk** (Kaldi NFST Grammar 模式) |
+| 模型 | `vosk-model-small-cn-0.22` (~42MB, 纯 CPU) |
+| Python 依赖 | `vosk`, `numpy` |
+| 订阅话题 | `/voice/audio_clip` — VAD 音频段 |
+| | `/voice/asr_result` — Whisper 转录文本 (二次匹配) |
+| 发布话题 | `/voice/wake` (Bool) — 唤醒状态 |
+| | `/voice/voice_command` (VoiceCommand) — 结构化指令 |
+| | `/voice/state` (String) — 当前状态 |
+| | `/voice/audio_for_asr` (Float32MultiArray) — 未匹配音频 → Whisper |
+
+**热词表（15 个短语，Vosk NFST Grammar 一次性匹配）：**
+
+| 短语 | 动作 | 说明 |
+|------|------|------|
+| 小车小车 | `wake_up` | 唤醒，蜂鸣 + 5s 超时 |
+| 前进 | `motor: forward` | 直行 |
+| 后退 | `motor: backward` | 倒车 |
+| 向左 | `motor: left` | 左平移 |
+| 向右 | `motor: right` | 右平移 |
+| 左转 | `motor: rotate_left` | 原地左转 |
+| 右转 | `motor: rotate_right` | 原地右转 |
+| 停止 | `motor: stop` | 停车 |
+| 看左边 | `servo: pan_left` | 云台左转 |
+| 看右边 | `servo: pan_right` | 云台右转 |
+| 回正 | `servo: home` | 云台回中 |
+| 过来 | `follow: start` | 人跟随启动 |
+| 跟着我 | `follow: start` | 人跟随启动 |
+| 回去 | `navigation: return_home` | 回起点 |
+| 蜂鸣 | `buzzer: short` | 蜂鸣器短响 |
+| 休眠 | `deactivate` | 关闭语音，回到休眠 |
+
+**状态机：**
+
+```
+SLEEPING ──"小车小车"──→ WAKE (蜂鸣800Hz + 5s定时)
+WAKE     ──超时/休眠──→ SLEEPING (蜂鸣400Hz)
+WAKE     ──指令匹配──→ WAKE (重置5s)
+WAKE     ──Vosk无匹配──→ 转发audio_for_asr → 等待Whisper结果
+```
+
+**Whisper 文本二次匹配：** Vosk 未匹配的音频经 Whisper 转录后，文本回传 hotword 节点再做一次字符串匹配（防止 Vosk 漏检），仍不匹配则丢弃（LLM 预留）。
 
 **参数：**
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `model_size` | tiny | tiny / base / small / medium / large |
-| `device` | cuda | cuda / cpu |
-| `language` | zh | 语言代码（zh=en, zh=Chinese） |
 | `sample_rate` | 16000 | 音频采样率 |
+| `vosk_model_path` | `~/vosk-model-small-cn-0.22` | Vosk 模型路径 |
+| `wake_timeout` | 5.0 | 唤醒后超时秒数 |
+| `wake_buzzer_freq` | 800 | 唤醒蜂鸣频率 |
+| `wake_buzzer_duration` | 0.1 | 唤醒蜂鸣时长 |
 
-**性能 (Jetson Orin Nano GPU):**
+### 1.4 语音识别 (voice_asr **精简**)
+
+**变更：** 移除唤醒逻辑、指令解析（关键词左转/右转/前进等）、buzzer/servo 发布，仅保留 Whisper 转录功能。
+
+| 项目 | 说明 |
+|------|------|
+| 节点名 | `voice_asr` |
+| 引擎 | **openai-whisper** (PyTorch, GPU 加速) |
+| 模型 | `base`（推荐）/ `tiny` / `small` |
+| 设备 | CUDA (GPU: Orin Nano) |
+| Python 依赖 | `openai-whisper`, `opencc`, `scipy` |
+| 订阅话题 | `/voice/audio_for_asr` (Float32MultiArray) — 仅唤醒态下转发 |
+| | `/voice/wake` (Bool) — 门控信号：仅 WAKE=true 时激活 |
+| 发布话题 | `/voice/asr_result` (std_msgs/String) — 转录文本 |
+
+**参数：**
+
+| 参数 | 默认值 | 说明 |
+|------|--------|------|
+| `model_size` | base | tiny / base / small |
+| `device` | cuda | cuda / cpu |
+| `language` | zh | 语言代码 |
+| `sample_rate` | 16000 | 音频采样率 |
+| `hp_cutoff` | 300 | 高通滤波，去除风扇噪声 |
+
+**性能 (Jetson Orin Nano GPU)：**
 
 | 模型 | 推理时间 (3s 音频) | 显存占用 |
 |------|-------------------|---------|
@@ -107,15 +218,7 @@ src/voice/
 | base | ~0.5s | ~800MB |
 | small | ~1.5s | ~1.5GB |
 
-**已知问题：**
-
-- `numba` 与高版本 `coverage` 不兼容，如遇 `AttributeError: module 'coverage' has no attribute 'types'`，降级 coverage：
-  ```bash
-  pip install "coverage==6.5.0"
-  ```
-- ctranslate2 (faster-whisper) 在 Jetson aarch64 上无 CUDA 支持的预编译 wheel，如需使用需从源码编译。
-
-### 1.4 ament_python 构建注意事项
+### 1.5 ament_python 构建注意事项
 
 语音包均为 `ament_python` 类型。ROS2 的 `ros2 run` 和 `ros2 launch` 在 `<prefix>/lib/<包名>/` 下查找可执行文件，但 colcon 的 `setup.py develop` 模式将 console_scripts 安装到 `bin/` 目录。
 
@@ -128,7 +231,7 @@ script_dir=$base/lib/voice_capture
 
 此配置将 develop 模式的脚本安装目录重定向到 `lib/<包名>/`，使 `ros2 run` 能正常找到可执行文件。
 
-### 1.5 DOA 声源定位 (voice_doa)
+### 1.6 DOA 声源定位 (voice_doa)
 
 | 项目 | 说明 |
 |------|------|
@@ -152,7 +255,7 @@ XVF3000 USB HID → hidapi/hidraw → voice_doa_node → /voice/doa_angle
                                               Pi3 STM32 舵机云台
 ```
 
-### 1.6 声源跟踪 (servo_tracker)
+### 1.7 声源跟踪 (servo_tracker)
 
 | 项目 | 说明 |
 |------|------|
@@ -162,13 +265,16 @@ XVF3000 USB HID → hidapi/hidraw → voice_doa_node → /voice/doa_angle
 | 发布 | `/servo_controller` (ServosPosition) |
 | 映射 | DOA 0° → center_pulse, ±90° → full range |
 
-### 1.7 启动流程
+### 1.8 启动流程
 
 1. `voice_capture_node` 启动音频流，发布原始音频帧
-2. `voice_vad_node` 接收音频帧，进行 VAD 检测
-3. VAD 检测到完整语音片段后发布到 `/voice/audio_clip`
-4. `voice_asr_node` 接收音频片段，使用 Whisper 进行 ASR
-5. 识别文本发布到 `/voice/asr_result` 和 `/voice/voice_command`
+2. `voice_vad_node` 接收音频帧，能量 VAD 检测，切出语音段
+3. `voice_hotword_node` 接收音频段 → Vosk NFST 匹配
+   - 匹配"小车小车" → 唤醒，蜂鸣，5s 超时
+   - 匹配其他热词 → 直接发布指令
+   - 唤醒态下无匹配 → 转发给 `voice_asr_node`
+4. `voice_asr_node` 唤醒态下接收音频 → Whisper 转录 → 回传给 hotword 做文本二次匹配
+5. 识别文本发布到 `/voice/asr_result`
 
 ```bash
 # 启动所有语音节点
@@ -264,17 +370,20 @@ builtin_interfaces/Time timestamp
 
 ## 5. ROS2 消息话题一览
 
-| 话题 | 类型 | 发布者 | 说明 |
-|------|------|--------|------|
-| `/voice/audio_raw` | `Float32MultiArray` | voice_capture | 16kHz PCM音频帧 |
-| `/voice/voice_activity` | `std_msgs/Bool` | voice_vad | 语音活动标志 |
-| `/voice/audio_clip` | `Float32MultiArray` | voice_vad | 完整语音片段 |
-| `/voice/asr_result` | `std_msgs/String` | voice_asr | ASR识别文本 |
-| `/voice/voice_command` | `VoiceCommand` | voice_asr | 结构化语音指令 |
-| `/voice/doa_angle` | `std_msgs/Float32` | voice_doa | 声源方向角度 (0-360°) |
-| `/voice/doa_direction` | `std_msgs/String` | voice_doa | 声源方向标签 |
-| `/voice/vad_hw` | `std_msgs/Bool` | voice_doa | 硬件 VAD 状态 (XVF3000) |
-| `/voice/status_led` | `std_msgs/ColorRGBA` | voice_doa sub | LED 灯环颜色控制 |
+| 话题 | 类型 | 发布者 | 消费者 | 说明 |
+|------|------|--------|--------|------|
+| `/voice/audio_raw` | `Float32MultiArray` | voice_capture | voice_vad | 16kHz PCM音频帧 |
+| `/voice/voice_activity` | `std_msgs/Bool` | voice_vad | hotword | 语音活动标志 |
+| `/voice/audio_clip` | `Float32MultiArray` | voice_vad | hotword | 完整语音片段 |
+| `/voice/wake` | `std_msgs/Bool` | hotword | asr, feedback, doa | 唤醒状态 |
+| `/voice/state` | `std_msgs/String` | hotword | feedback | 状态：sleeping/wake/listen |
+| `/voice/audio_for_asr` | `Float32MultiArray` | hotword | asr | 未匹配音频 → Whisper |
+| `/voice/asr_result` | `std_msgs/String` | asr | hotword | 转录文本（回传热词节点做二次匹配） |
+| `/voice/voice_command` | `VoiceCommand` | hotword | fusion/controller | 结构化指令（最终输出） |
+| `/voice/doa_angle` | `std_msgs/Float32` | voice_doa | tracker | 声源方向角度 (0-360°) |
+| `/voice/doa_direction` | `std_msgs/String` | voice_doa | - | 声源方向标签 |
+| `/voice/vad_hw` | `std_msgs/Bool` | voice_doa | - | 硬件 VAD 状态 (XVF3000) |
+| `/voice/status_led` | `std_msgs/ColorRGBA` | voice_feedback | voice_doa sub | LED 灯环颜色控制 |
 | `/camera/color/image_raw` | `sensor_msgs/Image` | astra_camera | RGB彩色图 |
 | `/camera/depth/image_raw` | `sensor_msgs/Image` | astra_camera | 深度图 |
 | `/vision/preprocessed_image` | `sensor_msgs/Image` | image_preprocess | 预处理后图像 |
@@ -287,8 +396,9 @@ builtin_interfaces/Time timestamp
 
 | 模块 | 延迟 | 帧率/FPS | 备注 |
 |------|------|----------|------|
-| 语音识别 (Whisper tiny) | ~300ms | - | openai-whisper on CUDA, 单次指令 |
-| 语音识别 (Whisper base) | ~500ms | - | 精度更高，适合中英文混合 |
+| 热词匹配 (Vosk NFST) | <50ms | 实时 | 纯 CPU，15 短语一次性推理 |
+| 语音识别 (Whisper tiny) | ~300ms | - | openai-whisper on CUDA, 仅唤醒态下触发 |
+| 语音识别 (Whisper base) | ~500ms | - | 精度更高 |
 | 目标检测 (YOLOv8n ONNX) | ~10-15ms | ~60-80 FPS | 640×480 输入，GPU 运行 |
 | 目标检测 (YOLOv8s ONNX) | ~15-25ms | ~40-60 FPS | 640×480 输入 |
 | 深度图获取 | - | 30 FPS | 硬件直接输出 |
