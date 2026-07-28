@@ -7,41 +7,43 @@
 | 包 | 类型 | 说明 |
 |----|------|------|
 | `voice_capture` | ament_python | ALSA 音频采集（sounddevice） |
-| `voice_vad` | ament_python | 能量 VAD 分割音频 |
-| `voice_hotword` | ament_python | 热词匹配 + 指令路由（Vosk NFST） |
-| `voice_asr` | ament_python | Whisper 本地转录（GPU） |
+| `voice_vad` | ament_python | 能量 VAD 分割音频（前缀缓冲防裁切） |
+| `voice_hotword` | ament_python | 双唤醒热词 + Vosk 语法模式匹配 |
+| `voice_asr` | ament_python | Whisper 本地转录 (GPU) |
 | `voice_feedback` | ament_python | 蜂鸣器/LED 反馈 |
 | `voice_doa` | ament_python | 声源定位 |
 | `voice_msgs` | ament_cmake | 自定义消息 |
 
 ### 架构总览
 
-语音识别分三级流水线，每级开销递增：
+语音识别分三级流水线，每级开销递增。支持双唤醒词：
 
 ```
 voice_capture → voice_vad → voice_hotword
                                    │
                     ┌──────────────┼────────────────┐
-                    │ 15个热词命中   │ "小车小车"命中    │ 无匹配
-                    ▼              ▼                 ▼
-              直接执行指令     唤醒 + 5s超时    voice_asr(Whisper)
-                                    │                 │
-                                    ▼                 ▼
-                               /voice/wake      /voice/asr_result
-                                    │                 │
-                                    └─────┬───────────┘
-                                          │ (回 hotword 做文本二次匹配)
-                                          ▼
-                                    ┌──────────┐
-                                    │ 匹配→指令  │
-                                    │ 不匹配→丢弃│ (LLM 暂未实现)
-                                    └──────────┘
+                    │              │                │
+              小车小车唤醒     小方小方唤醒      非唤醒词
+                    │              │              │
+                    ▼              ▼               ▼
+             Vosk语法匹配     ASR直通模式      静默丢弃
+             (19短语, CPU)    (直接forward)
+                    │              │
+         ┌──────────┼──┐           │
+         │ 命中     │不匹配         │
+         ▼          ▼              ▼
+      执行指令  静默等待       Whisper转录
+               (不走ASR)           │
+                                  ▼
+                            asr_result
+                              →二次匹配
+                              →执行指令
 ```
 
 | 级别 | 触发条件 | GPU | 延迟 |
 |------|---------|-----|------|
-| **热词级** | Vosk 匹配 15 个预定义短语 | ❌ | <50ms |
-| **Whisper** | 唤醒态下 Vosk 未命中 → 转录 | ✅ | ~300ms |
+| **热词级** | Vosk 语法模式匹配 19 个预定义短语 | ❌ | <50ms |
+| **Whisper** | ASR 直通模式（"小方小方"唤醒） → 转录 | ✅ | ~300ms |
 | **LLM 云端** | 暂未实现，预留接口 | ❌ | - |
 
 ### 目录结构
@@ -121,19 +123,21 @@ src/voice/
 | `sample_rate` | 16000 | 采样率 |
 | `frame_ms` | 30 | VAD 帧长 (ms) |
 | `silence_timeout` | 0.5 | 静音超时 (秒)，超过后认为语音结束 |
+| `prefix_frames` | 10 | 静音前缀缓冲帧数 (~300ms)，防裁切第一个字 |
 
 **工作流程：**
 1. 从 `/voice/audio_raw` 接收 PCM 音频帧
 2. 每 30ms 帧计算 RMS
-3. RMS > 0.02 → 说话中，缓存音频
-4. 静音持续 `silence_timeout` 秒后，发布完整语音片段到 `/voice/audio_clip`
+3. 维持 **环形前缀缓冲**（最近 10 帧），静默时持续缓存
+4. RMS > 0.02 → 说话中，将前缀拼到音频片段开头，缓存音频
+5. 静音持续 `silence_timeout` 秒后，发布完整语音片段到 `/voice/audio_clip`
 
 ### 1.3 热词匹配 (voice_hotword **新增**)
 
 | 项目 | 说明 |
 |------|------|
 | 节点名 | `voice_hotword` |
-| 引擎 | **Vosk** (Kaldi NFST Grammar 模式) |
+| 引擎 | **Vosk** (Kaldi Grammar 模式，字符空格分隔 + silence吸收) |
 | 模型 | `vosk-model-small-cn-0.22` (~42MB, 纯 CPU) |
 | Python 依赖 | `vosk`, `numpy` |
 | 订阅话题 | `/voice/audio_clip` — VAD 音频段 |
@@ -141,15 +145,23 @@ src/voice/
 | 发布话题 | `/voice/wake` (Bool) — 唤醒状态 |
 | | `/voice/voice_command` (VoiceCommand) — 结构化指令 |
 | | `/voice/state` (String) — 当前状态 |
-| | `/voice/audio_for_asr` (Float32MultiArray) — 未匹配音频 → Whisper |
+| | `/voice/audio_for_asr` (Float32MultiArray) — ASR模式→Whisper |
 
-**热词表（15 个短语，Vosk NFST Grammar 一次性匹配）：**
+**双唤醒词：**
+
+| 唤醒词 | 模式 | 蜂鸣 | 说明 |
+|--------|------|------|------|
+| 小车小车 | Vosk 语法匹配 | 800Hz 单次 | 只匹配 19 个预设短语，不命中则静默忽略 |
+| 小方小方 | ASR 直通 | 1000+800Hz 双响 | 跳过 Vosk，每段音频直接发 Whisper 转录 |
+
+**热词表（19 个短语，Vosk Grammar 模式）：**
 
 | 短语 | 动作 | 说明 |
 |------|------|------|
-| 小车小车 | `wake_up` | 唤醒，蜂鸣 + 5s 超时 |
-| 前进 | `motor: forward` | 直行 |
-| 后退 | `motor: backward` | 倒车 |
+| 小车小车 | `wake` | 唤醒 → Vosk 模式 |
+| 小方小方 | `wake_asr` | 唤醒 → ASR 直通模式 |
+| 前进 / 向前 | `motor: forward` | 直行（支持两种发音） |
+| 后退 / 向后 | `motor: backward` | 倒车（支持两种发音） |
 | 向左 | `motor: left` | 左平移 |
 | 向右 | `motor: right` | 右平移 |
 | 左转 | `motor: rotate_left` | 原地左转 |
@@ -158,30 +170,35 @@ src/voice/
 | 看左边 | `servo: pan_left` | 云台左转 |
 | 看右边 | `servo: pan_right` | 云台右转 |
 | 回正 | `servo: home` | 云台回中 |
-| 过来 | `follow: start` | 人跟随启动 |
-| 跟着我 | `follow: start` | 人跟随启动 |
+| 过来 / 跟着我 | `follow: start` | 人跟随启动 |
 | 回去 | `navigation: return_home` | 回起点 |
 | 蜂鸣 | `buzzer: short` | 蜂鸣器短响 |
-| 休眠 | `deactivate` | 关闭语音，回到休眠 |
+| 退出 | `deactivate` | 关闭语音，回到休眠（Vosk/ASR 模式均有效） |
 
 **状态机：**
 
 ```
-SLEEPING ──"小车小车"──→ WAKE (蜂鸣800Hz + 5s定时)
-WAKE     ──超时/休眠──→ SLEEPING (蜂鸣400Hz)
-WAKE     ──指令匹配──→ WAKE (重置5s)
-WAKE     ──Vosk无匹配──→ 转发audio_for_asr → 等待Whisper结果
+SLEEPING ──"小车小车"──→ WAKE (Vosk模式, 蜂鸣800Hz, 5s定时)
+SLEEPING ──"小方小方"──→ LISTEN (ASR模式, 蜂鸣1000+800Hz)
+WAKE(Vosk) ──指令匹配──→ 执行指令 + 重置5s
+WAKE(Vosk) ──无匹配──→ 静默忽略, 重置5s
+WAKE(ASR)  ──音频到达──→ 转发Whisper (state=LISTEN)
+WAKE(ASR)  ──"退出"──→ SLEEPING
+WAKE       ──超时──→ SLEEPING (蜂鸣400Hz)
+LISTEN     ──ASR返回──→ WAKE 或 SLEEPING
 ```
 
-**Whisper 文本二次匹配：** Vosk 未匹配的音频经 Whisper 转录后，文本回传 hotword 节点再做一次字符串匹配（防止 Vosk 漏检），仍不匹配则丢弃（LLM 预留）。
+**Epoch 隔离机制：** 每次唤醒递增 `_current_epoch`。ASR 转发时记录当前 epoch，结果返回时校验 epoch 是否匹配，不匹配则丢弃（避免前一轮的慢 ASR 结果污染当前状态）。
 
 **参数：**
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| `sample_rate` | 16000 | 音频采样率 |
+| `sample_rate` | 16000 | 采样率 |
 | `vosk_model_path` | `~/vosk-model-small-cn-0.22` | Vosk 模型路径 |
-| `wake_timeout` | 5.0 | 唤醒后超时秒数 |
+| `wake_timeout` | 5.0 | 唤醒超时 (秒) |
+| `clip_save_dir` | `/tmp/vosk_clips` | 调试音频保存路径 |
+| `clip_save_enabled` | false | 是否保存调试音频 |
 | `wake_buzzer_freq` | 800 | 唤醒蜂鸣频率 |
 | `wake_buzzer_duration` | 0.1 | 唤醒蜂鸣时长 |
 
@@ -263,18 +280,21 @@ XVF3000 USB HID → hidapi/hidraw → voice_doa_node → /voice/doa_angle
 | 包 | `jetauto_app` |
 | 订阅 | `/voice/doa_angle` (Float32) |
 | 发布 | `/servo_controller` (ServosPosition) |
-| 映射 | DOA 0° → center_pulse, ±90° → full range |
+| 映射 | DOA 0° → center_pulse, ±45° → full range (90°总视野) |
 
 ### 1.8 启动流程
 
 1. `voice_capture_node` 启动音频流，发布原始音频帧
-2. `voice_vad_node` 接收音频帧，能量 VAD 检测，切出语音段
-3. `voice_hotword_node` 接收音频段 → Vosk NFST 匹配
-   - 匹配"小车小车" → 唤醒，蜂鸣，5s 超时
-   - 匹配其他热词 → 直接发布指令
-   - 唤醒态下无匹配 → 转发给 `voice_asr_node`
-4. `voice_asr_node` 唤醒态下接收音频 → Whisper 转录 → 回传给 hotword 做文本二次匹配
-5. 识别文本发布到 `/voice/asr_result`
+2. `voice_vad_node` 接收音频帧，能量 VAD 检测（前缀缓冲防裁切），切出语音段
+3. `voice_hotword_node` 接收音频段 → Vosk Grammar 模式匹配
+   - 匹配"小车小车" → 唤醒，Vosk 语法模式，蜂鸣800Hz，5s超时
+   - 匹配"小方小方" → 唤醒，ASR直通模式，蜂鸣1000+800Hz
+   - 匹配"退出" → 回到休眠（两种模式均有效）
+   - Vosk 模式下匹配其他热词 → 直接发布指令
+   - Vosk 模式下无匹配 → 静默忽略（不走ASR兜底）
+   - ASR 模式下音频到达 → 直接转发 `voice_asr_node`
+4. `voice_asr_node` 接收音频 → Whisper 转录 → 回传给 hotword 做文本二次匹配
+5. `voice_feedback_node` 订阅 `/voice/state`，根据状态输出蜂鸣/LED
 
 ```bash
 # 启动所有语音节点

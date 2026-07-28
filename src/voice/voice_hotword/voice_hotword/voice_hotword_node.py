@@ -173,6 +173,10 @@ class VoiceHotwordNode(Node):
     def _buzzer_wake(self):
         self._pub_buzzer(800, 0.10)
 
+    def _buzzer_wake_asr(self):
+        self._pub_buzzer(1000, 0.10)
+        self._pub_buzzer(800, 0.08)
+
     def _buzzer_sleep(self):
         self._pub_buzzer(400, 0.05)
 
@@ -196,7 +200,6 @@ class VoiceHotwordNode(Node):
         self._state = self.STATE_WAKE
         self._pub_wake(True)
         self._pub_state(self.STATE_WAKE)
-        self._buzzer_wake()
         self._reset_wake_timer()
         self.get_logger().info("Woke up — listening for commands")
 
@@ -277,10 +280,12 @@ class VoiceHotwordNode(Node):
             if phrase == "小车小车":
                 self._wake_up()
                 self._asr_mode = False
+                self._buzzer_wake()
                 self.get_logger().info("Wake: Vosk grammar mode (小车小车)")
             elif phrase == "小方小方":
                 self._wake_up()
                 self._asr_mode = True
+                self._buzzer_wake_asr()
                 self.get_logger().info("Wake: ASR direct mode (小方小方)")
                 # First clip goes to ASR immediately
                 self._state = self.STATE_LISTEN
@@ -291,7 +296,10 @@ class VoiceHotwordNode(Node):
 
         # STATE_WAKE
         if self._asr_mode:
-            # ASR mode: skip Vosk, forward directly to Whisper
+            # ASR mode: check system commands first, then forward to Whisper
+            if phrase == "退出":
+                self._go_to_sleep()
+                return
             self._state = self.STATE_LISTEN
             self._pub_state(self.STATE_LISTEN)
             self._asr_epoch = self._current_epoch

@@ -19,8 +19,7 @@ Parameters (~servo_tracker):
   servo_pan_id     (int)   Pan servo ID  (default: 1)
   center_pulse     (int)   Center position in pulses (default: 1500)
   range_pulse      (int)   Max deviation from center (default: 1000)
-  angle_range      (float) DOA range that maps to full servo range°
-                           (default: 180.0 — ±90° from front)
+  angle_range      (float) DOA range that maps to full servo range°\n                           (default: 90.0 — ±45° from front)
   invert           (bool)  Reverse servo direction (default: false)
   center_timeout   (float) Seconds without DOA before centering (default: 2.0)
   rate             (float) Control loop rate in Hz (default: 20.0)
@@ -39,7 +38,7 @@ class ServoTrackerNode(Node):
         self.servo_pan_id = self.declare_parameter('servo_pan_id', 1).value
         self.center_pulse = self.declare_parameter('center_pulse', 1500).value
         self.range_pulse = self.declare_parameter('range_pulse', 1000).value
-        self.angle_range = self.declare_parameter('angle_range', 180.0).value
+        self.angle_range = self.declare_parameter('angle_range', 90.0).value
         self.invert = self.declare_parameter('invert', False).value
         self.center_timeout = self.declare_parameter('center_timeout', 2.0).value
         self.rate_hz = self.declare_parameter('rate', 20.0).value
