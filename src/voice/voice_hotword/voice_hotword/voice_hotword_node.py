@@ -2,17 +2,23 @@
 """
 voice_hotword_node.py
 
-Hotword detection and command routing using Vosk NFST grammar mode.
+Hotword detection and command routing using Vosk grammar mode.
 Three-tier pipeline:
-  1. Vosk audio-level matching (16 phrases, ~50ms, no GPU)
+  1. Vosk audio-level matching (16 phrases, grammar-constrained, ~50ms, no GPU)
   2. Whisper text-level secondary matching (via /voice/asr_result)
   3. LLM placeholder (future)
 
+Dual wake word:
+  "小车小车" → WAKE(Vosk语法匹配模式, 蜂鸣800Hz + 5s timer)
+  "小方小方" → WAKE(ASR直通模式, 跳过Vosk直接forward到Whisper)
+
 State machine:
-  SLEEPING → "小车小车" → WAKE (蜂鸣800Hz + 5s timer)
+  SLEEPING → "小车小车" → WAKE (Vosk语法匹配)
+  SLEEPING → "小方小方" → LISTEN (ASR直通)
   WAKE → command match → execute + reset timer
   WAKE → no match → forward audio to ASR
   WAKE → timeout/"休眠" → SLEEPING
+  LISTEN → ASR done → WAKE or SLEEPING
 """
 
 import json
@@ -45,6 +51,7 @@ PHRASE_MAP = {
     "蜂鸣":   ("buzzer", {"mode": "short"}),
     "休眠":   ("_deactivate", {}),
     "小车小车": ("_wake", {}),
+    "小方小方": ("_wake_asr", {}),
 }
 
 ALL_PHRASES = list(PHRASE_MAP.keys())
@@ -63,12 +70,13 @@ class VoiceHotwordNode(Node):
         vosk_model_path = self.declare_parameter("vosk_model_path", "~/vosk-model-small-cn-0.22").value
         self.wake_timeout = self.declare_parameter("wake_timeout", 5.0).value
         self._clip_save_dir = self.declare_parameter("clip_save_dir", "/tmp/vosk_clips").value
-        self._clip_save_enabled = self.declare_parameter("clip_save_enabled", True).value
+        self._clip_save_enabled = self.declare_parameter("clip_save_enabled", False).value
 
         # State
         self._state = self.STATE_SLEEPING
         self._wake_timer = None
         self._last_wake_time = 0.0
+        self._asr_mode = False  # True = ASR直通, False = Vosk语法匹配
 
         # Vosk model
         self._vosk_model = None
@@ -111,12 +119,14 @@ class VoiceHotwordNode(Node):
             self.get_logger().error(f"Failed to load Vosk: {e}")
 
     def _make_recognizer(self):
-        """Create a Vosk recognizer in non-grammar mode (free dictation)."""
+        """Create a Vosk recognizer in grammar mode (only match our phrases)."""
         if self._vosk_model is None:
             return None
         from vosk import KaldiRecognizer
-        rec = KaldiRecognizer(self._vosk_model, self.sample_rate)
-        rec.SetWords(False)
+        # Grammar mode — Vosk only decodes against our 17 phrases
+        grammar = json.dumps(ALL_PHRASES, ensure_ascii=False)
+        rec = KaldiRecognizer(self._vosk_model, self.sample_rate, grammar)
+        rec.SetWords(True)
         return rec
 
     # ── Publish helpers ───────────────────────────────────────────
@@ -185,6 +195,7 @@ class VoiceHotwordNode(Node):
 
     def _go_to_sleep(self):
         self._state = self.STATE_SLEEPING
+        self._asr_mode = False
         self._pub_wake(False)
         self._pub_state(self.STATE_SLEEPING)
         self._buzzer_sleep()
@@ -254,25 +265,49 @@ class VoiceHotwordNode(Node):
         phrase = self._match_audio(audio)
 
         if self._state == self.STATE_SLEEPING:
-            # Only "小车小车" is accepted in SLEEPING
             if phrase == "小车小车":
                 self._wake_up()
-            # Everything else is silently discarded
+                self._asr_mode = False
+                self.get_logger().info("Wake: Vosk grammar mode (小车小车)")
+            elif phrase == "小方小方":
+                self._wake_up()
+                self._asr_mode = True
+                self.get_logger().info("Wake: ASR direct mode (小方小方)")
+                # First clip goes to ASR immediately
+                self._state = self.STATE_LISTEN
+                self._pub_state(self.STATE_LISTEN)
+                self._asr_fwd_pub.publish(msg)
             return
 
         # STATE_WAKE
+        if self._asr_mode:
+            # ASR mode: skip Vosk, forward directly to Whisper
+            self._state = self.STATE_LISTEN
+            self._pub_state(self.STATE_LISTEN)
+            self._asr_fwd_pub.publish(msg)
+            self.get_logger().debug("ASR mode — forwarded to ASR")
+            return
+
+        # Vosk grammar mode: phrase matching
         if phrase is None:
             # No Vosk match — forward to ASR
             self._state = self.STATE_LISTEN
             self._pub_state(self.STATE_LISTEN)
-            self._asr_fwd_pub.publish(msg)  # forward raw Float32MultiArray
+            self._asr_fwd_pub.publish(msg)
             self.get_logger().debug("No Vosk match — forwarded to ASR")
             return
 
         # Matched a phrase
         if phrase == "小车小车":
-            # Already awake, just reset timer
             self._reset_wake_timer()
+            return
+        elif phrase == "小方小方":
+            # Switch to ASR mode during session
+            self._asr_mode = True
+            self._state = self.STATE_LISTEN
+            self._pub_state(self.STATE_LISTEN)
+            self._asr_fwd_pub.publish(msg)
+            self.get_logger().info("Switched to ASR mode (小方小方)")
             return
         elif phrase == "休眠":
             self._go_to_sleep()
@@ -294,17 +329,20 @@ class VoiceHotwordNode(Node):
             return
 
         for phrase in ALL_PHRASES:
-            if phrase in text:
-                if phrase == "小车小车":
-                    self._reset_wake_timer()
-                    break
-                elif phrase == "休眠":
-                    self._go_to_sleep()
-                    return
-                else:
-                    self._pub_command(phrase)
-                    self._buzzer_ack()
-                    break
+            if phrase not in text:
+                continue
+            if phrase == "小车小车":
+                self._reset_wake_timer()
+            elif phrase == "小方小方":
+                # Ignore — wake-only phrase in ASR result
+                continue
+            elif phrase == "休眠":
+                self._go_to_sleep()
+                return
+            else:
+                self._pub_command(phrase)
+                self._buzzer_ack()
+            break  # first match
 
         # Back to WAKE state
         self._state = self.STATE_WAKE
