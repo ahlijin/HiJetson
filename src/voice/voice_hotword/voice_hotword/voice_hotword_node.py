@@ -123,8 +123,10 @@ class VoiceHotwordNode(Node):
         if self._vosk_model is None:
             return None
         from vosk import KaldiRecognizer
-        # Grammar mode — Vosk only decodes against our 17 phrases
-        grammar = json.dumps(ALL_PHRASES, ensure_ascii=False)
+        # Grammar mode — space-separated chars for Chinese model
+        spaced = [' '.join(p) for p in ALL_PHRASES] + ['[unk]']
+        # "[unk]" absorbs silence/non-speech so Vosk doesn't force-match
+        grammar = json.dumps(spaced, ensure_ascii=False)
         rec = KaldiRecognizer(self._vosk_model, self.sample_rate, grammar)
         rec.SetWords(True)
         return rec
@@ -248,9 +250,11 @@ class VoiceHotwordNode(Node):
         text = result.get("text", "").strip()
         self._save_audio_clip(audio_clip, text if text else "no_match")
         if text:
-            self.get_logger().info(f'Vosk heard: "{text}"')
+            # Grammar mode outputs space-separated chars, strip for matching
+            plain = text.replace(" ", "")
+            self.get_logger().info(f'Vosk heard: "{text}" → "{plain}"')
             for phrase in ALL_PHRASES:
-                if phrase in text:
+                if phrase in plain:
                     return phrase
             return None  # Heard something but not a hotword
         else:
