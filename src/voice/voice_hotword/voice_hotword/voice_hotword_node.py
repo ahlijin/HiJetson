@@ -17,7 +17,7 @@ State machine:
   SLEEPING → "小方小方" → LISTEN (ASR直通)
   WAKE → command match → execute + reset timer
   WAKE → no match → forward audio to ASR
-  WAKE → timeout/"休眠" → SLEEPING
+  WAKE → timeout/"退出" → SLEEPING
   LISTEN → ASR done → WAKE or SLEEPING
 """
 
@@ -36,7 +36,9 @@ from builtin_interfaces.msg import Time as TimeMsg
 # ── Phrase → command mapping ─────────────────────────────────────
 PHRASE_MAP = {
     "前进":   ("motor", {"direction": "forward"}),
+    "向前":   ("motor", {"direction": "forward"}),
     "后退":   ("motor", {"direction": "backward"}),
+    "向后":   ("motor", {"direction": "backward"}),
     "向左":   ("motor", {"direction": "left"}),
     "向右":   ("motor", {"direction": "right"}),
     "左转":   ("motor", {"direction": "rotate_left"}),
@@ -49,7 +51,7 @@ PHRASE_MAP = {
     "跟着我": ("follow", {"mode": "start"}),
     "回去":   ("navigation", {"mode": "return_home"}),
     "蜂鸣":   ("buzzer", {"mode": "short"}),
-    "休眠":   ("_deactivate", {}),
+    "退出":   ("_deactivate", {}),
     "小车小车": ("_wake", {}),
     "小方小方": ("_wake_asr", {}),
 }
@@ -77,6 +79,8 @@ class VoiceHotwordNode(Node):
         self._wake_timer = None
         self._last_wake_time = 0.0
         self._asr_mode = False  # True = ASR直通, False = Vosk语法匹配
+        self._current_epoch = 0  # 唤醒轮次，递增
+        self._asr_epoch = 0      # 最近一次forward给ASR的轮次
 
         # Vosk model
         self._vosk_model = None
@@ -188,6 +192,7 @@ class VoiceHotwordNode(Node):
 
     # ── State transitions ─────────────────────────────────────────
     def _wake_up(self):
+        self._current_epoch += 1
         self._state = self.STATE_WAKE
         self._pub_wake(True)
         self._pub_state(self.STATE_WAKE)
@@ -280,6 +285,7 @@ class VoiceHotwordNode(Node):
                 # First clip goes to ASR immediately
                 self._state = self.STATE_LISTEN
                 self._pub_state(self.STATE_LISTEN)
+                self._asr_epoch = self._current_epoch
                 self._asr_fwd_pub.publish(msg)
             return
 
@@ -288,17 +294,15 @@ class VoiceHotwordNode(Node):
             # ASR mode: skip Vosk, forward directly to Whisper
             self._state = self.STATE_LISTEN
             self._pub_state(self.STATE_LISTEN)
+            self._asr_epoch = self._current_epoch
             self._asr_fwd_pub.publish(msg)
             self.get_logger().debug("ASR mode — forwarded to ASR")
             return
 
         # Vosk grammar mode: phrase matching
         if phrase is None:
-            # No Vosk match — forward to ASR
-            self._state = self.STATE_LISTEN
-            self._pub_state(self.STATE_LISTEN)
-            self._asr_fwd_pub.publish(msg)
-            self.get_logger().debug("No Vosk match — forwarded to ASR")
+            # No Vosk match — ignore silently, stay in WAKE
+            self._reset_wake_timer()
             return
 
         # Matched a phrase
@@ -310,10 +314,11 @@ class VoiceHotwordNode(Node):
             self._asr_mode = True
             self._state = self.STATE_LISTEN
             self._pub_state(self.STATE_LISTEN)
+            self._asr_epoch = self._current_epoch
             self._asr_fwd_pub.publish(msg)
             self.get_logger().info("Switched to ASR mode (小方小方)")
             return
-        elif phrase == "休眠":
+        elif phrase == "退出":
             self._go_to_sleep()
             return
         else:
@@ -324,6 +329,10 @@ class VoiceHotwordNode(Node):
     def asr_result_callback(self, msg: String):
         """Text-level secondary matching from Whisper."""
         if self._state == self.STATE_SLEEPING:
+            return
+        # 跳过上一轮的ASR结果（Whisper跑得慢，结果可能跨轮次）
+        if self._asr_epoch != self._current_epoch:
+            self.get_logger().debug("Stale ASR result ignored (epoch mismatch)")
             return
         text = msg.data.strip()
         if not text:
@@ -340,7 +349,7 @@ class VoiceHotwordNode(Node):
             elif phrase == "小方小方":
                 # Ignore — wake-only phrase in ASR result
                 continue
-            elif phrase == "休眠":
+            elif phrase == "退出":
                 self._go_to_sleep()
                 return
             else:
