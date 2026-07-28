@@ -25,6 +25,8 @@ voice_hotword:
     sample_rate: 16000
     vosk_model_path: "~/vosk-model-small-cn-0.22"
     wake_timeout: 5.0
+    clip_save_dir: "/tmp/vosk_clips"
+    clip_save_enabled: true
 
 voice_feedback:
   ros__parameters:

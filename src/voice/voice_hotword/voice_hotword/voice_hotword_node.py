@@ -18,6 +18,7 @@ State machine:
 import json
 import os
 import time
+import wave
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -61,6 +62,8 @@ class VoiceHotwordNode(Node):
         self.sample_rate = self.declare_parameter("sample_rate", 16000).value
         vosk_model_path = self.declare_parameter("vosk_model_path", "~/vosk-model-small-cn-0.22").value
         self.wake_timeout = self.declare_parameter("wake_timeout", 5.0).value
+        self._clip_save_dir = self.declare_parameter("clip_save_dir", "/tmp/vosk_clips").value
+        self._clip_save_enabled = self.declare_parameter("clip_save_enabled", True).value
 
         # State
         self._state = self.STATE_SLEEPING
@@ -190,6 +193,27 @@ class VoiceHotwordNode(Node):
             self._wake_timer = None
         self.get_logger().info("Sleeping")
 
+    # ── Audio clip saving (debug) ────────────────────────────────
+    def _save_audio_clip(self, audio: np.ndarray, tag: str):
+        """Save raw audio as WAV for offline listening / debugging."""
+        if not self._clip_save_enabled:
+            return
+        d = self._clip_save_dir
+        try:
+            os.makedirs(d, exist_ok=True)
+            t = time.strftime("%H%M%S")
+            safe_tag = tag.replace(" ", "_")[:24] or "empty"
+            path = os.path.join(d, f"vosk_{t}_{safe_tag}.wav")
+            audio_int16 = (audio * 32767).astype(np.int16)
+            with wave.open(path, "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(self.sample_rate)
+                wf.writeframes(audio_int16.tobytes())
+            self.get_logger().debug(f"Clip saved: {path}")
+        except Exception as e:
+            self.get_logger().warn(f"Clip save failed: {e}")
+
     # ── Vosk audio matching ───────────────────────────────────────
     def _match_audio(self, audio_clip: np.ndarray) -> str | None:
         """Feed audio clip to Vosk, return matched phrase or None."""
@@ -211,6 +235,7 @@ class VoiceHotwordNode(Node):
         # Try final result
         result = json.loads(rec.FinalResult())
         text = result.get("text", "").strip()
+        self._save_audio_clip(audio_clip, text if text else "no_match")
         if text:
             self.get_logger().info(f'Vosk heard: "{text}"')
             for phrase in ALL_PHRASES:
