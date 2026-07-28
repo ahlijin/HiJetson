@@ -29,6 +29,7 @@ class VoiceVADNode(Node):
         self.sample_rate = self.declare_parameter('sample_rate', 16000).value
         self.frame_ms = self.declare_parameter('frame_ms', 30).value
         self.silence_timeout = self.declare_parameter('silence_timeout', 0.5).value
+        self.prefix_frames = self.declare_parameter('prefix_frames', 10).value  # ~300ms 回看
 
         self.frame_samples = int(self.sample_rate * self.frame_ms / 1000)
         self.silence_max_frames = int(self.silence_timeout / (self.frame_ms / 1000))
@@ -50,6 +51,7 @@ class VoiceVADNode(Node):
         self.speech_active = False
         self.silence_frames = 0
         self._hw_vad = False
+        self.prefix_buffer = np.array([], dtype=np.float32)  # 环形前缀
 
         self.get_logger().info(
             f'VAD started: source=hw (XVF3000), '
@@ -74,10 +76,18 @@ class VoiceVADNode(Node):
         self._publish_activity()
 
     def _feed(self, is_speech: bool, frame: np.ndarray):
+        # 始终维护前缀环形缓冲（最近 N 帧）
+        self.prefix_buffer = np.concatenate([self.prefix_buffer, frame])
+        max_prefix = self.prefix_frames * self.frame_samples
+        if len(self.prefix_buffer) > max_prefix:
+            self.prefix_buffer = self.prefix_buffer[-max_prefix:]
+
         if is_speech:
             if not self.speech_active:
                 self.speech_active = True
-                self.audio_buffer = np.array([], dtype=np.float32)
+                # 把前缀拼到开头，避免裁掉第一个字
+                self.audio_buffer = self.prefix_buffer.copy()
+                self.prefix_buffer = np.array([], dtype=np.float32)
                 self.get_logger().debug('Speech started')
 
             self.silence_frames = 0
@@ -91,6 +101,7 @@ class VoiceVADNode(Node):
                     self._publish_clip()
                     self.speech_active = False
                     self.audio_buffer = np.array([], dtype=np.float32)
+                    self.prefix_buffer = np.array([], dtype=np.float32)
                     self.silence_frames = 0
                     self.get_logger().debug('Speech ended')
 

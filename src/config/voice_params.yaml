@@ -19,6 +19,7 @@ voice_vad:
     sample_rate: 16000
     frame_ms: 30
     silence_timeout: 0.5
+    prefix_frames: 10        # ~300ms 静音前缀，避免裁掉第一个字
 
 voice_hotword:
   ros__parameters:
