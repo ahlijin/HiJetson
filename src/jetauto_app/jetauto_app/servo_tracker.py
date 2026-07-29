@@ -2,32 +2,34 @@
 """
 servo_tracker_node.py
 
-Subscribes to DOA angle (/voice/doa_angle) and drives the camera gimbal
-pan servo to face the sound source. Regresses to center when no DOA
-is reported for a configurable timeout.
+Listens for voice commands (/voice/voice_command). On receiving a command,
+rotates the camera gimbal (servo) toward the latest DOA direction.
+If the sound source is beyond the servo's mechanical range (±45°),
+publishes cmd_vel to rotate the whole robot to face the sound.
 
-Servo mapping:
-  - Servo ID 1 = pan (horizontal)
-  - Position range: 500 (left) ~ 2500 (right), center ~ 1500
-  - DOA 0° = front (center), positive = clockwise
+DOA data is read passively — rotation only happens on voice command.
 
 Topics:
-  /voice/doa_angle      (std_msgs/Float32, sub)  — DOA angle or -1 if none
-  /servo_controller     (ServosPosition, pub)    — gimbal servo command
+  /voice/doa_angle       (Float32, sub)      — latest DOA angle
+  /voice/voice_command   (VoiceCommand, sub) — triggers rotation
+  /servo_controller      (ServosPosition, pub) — gimbal servo
+  /cmd_vel               (Twist, pub)        — robot rotation
 
 Parameters (~servo_tracker):
-  servo_pan_id     (int)   Pan servo ID  (default: 1)
-  center_pulse     (int)   Center position in pulses (default: 1500)
-  range_pulse      (int)   Max deviation from center (default: 1000)
-  angle_range      (float) DOA range that maps to full servo range°\n                           (default: 90.0 — ±45° from front)
+  servo_pan_id     (int)   Pan servo ID           (default: 1)
+  center_pulse     (int)   Center position         (default: 1500)
+  range_pulse      (int)   Max deviation from centre (default: 1000)
+  angle_range      (float) DOA range mapped to full servo range (default: 90.0)
   invert           (bool)  Reverse servo direction (default: false)
-  center_timeout   (float) Seconds without DOA before centering (default: 2.0)
-  rate             (float) Control loop rate in Hz (default: 20.0)
+  rotate_gain      (float) Rotation speed (default: 0.3)
+  rotate_duration  (float) Seconds to rotate before re-checking (default: 0.5)
 """
 
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import Float32
+from geometry_msgs.msg import Twist, Vector3
+from voice_msgs.msg import VoiceCommand
 from ros_robot_controller_msgs.msg import ServosPosition, ServoPosition
 
 
@@ -40,44 +42,87 @@ class ServoTrackerNode(Node):
         self.range_pulse = self.declare_parameter('range_pulse', 1000).value
         self.angle_range = self.declare_parameter('angle_range', 90.0).value
         self.invert = self.declare_parameter('invert', False).value
-        self.center_timeout = self.declare_parameter('center_timeout', 2.0).value
-        self.rate_hz = self.declare_parameter('rate', 20.0).value
+        self.rotate_gain = self.declare_parameter('rotate_gain', 0.3).value
+        self.rotate_duration = self.declare_parameter('rotate_duration', 0.5).value
 
         self._servo_pub = self.create_publisher(ServosPosition, '/servo_controller', 1)
+        self._cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 1)
 
         # State
-        self._target_angle: float | None = None  # None = go to center
-        self._last_doa_time = 0.0
         self._current_pulse = float(self.center_pulse)
+        self._latest_doa: float | None = None
+        self._rotate_timer = None
 
-        # Subscriber
-        self._doa_sub = self.create_subscription(
-            Float32, '/voice/doa_angle', self._doa_callback, 10
-        )
-
-        # Timer
-        self._timer = self.create_timer(1.0 / self.rate_hz, self._control_loop)
+        # Subscribers
+        self.create_subscription(Float32, '/voice/doa_angle', self._doa_cb, 10)
+        self.create_subscription(VoiceCommand, '/voice/voice_command', self._cmd_cb, 10)
 
         self.get_logger().info(
             f"ServoTracker started: servo={self.servo_pan_id}, "
-            f"center={self.center_pulse}, range={self.range_pulse} ({self.angle_range}°), "
-            f"timeout={self.center_timeout}s"
+            f"center={self.center_pulse}, range={self.range_pulse} "
+            f"({self.angle_range}°), rotate_gain={self.rotate_gain}"
         )
 
-    def _doa_callback(self, msg: Float32):
-        if msg.data < 0:
-            self._target_angle = None
+    # ── DOA (passive — just store latest) ──────────────────────────
+
+    def _doa_cb(self, msg: Float32):
+        if msg.data >= 0:
+            self._latest_doa = msg.data
+
+    # ── Voice command → rotate ─────────────────────────────────────
+
+    def _cmd_cb(self, msg: VoiceCommand):
+        if self._latest_doa is None:
+            self.get_logger().info("No DOA data yet — skipping rotation")
+            return
+        self._rotate_to_doa(self._latest_doa)
+
+    # ── Core rotation logic ────────────────────────────────────────
+
+    def _rotate_to_doa(self, doa: float):
+        # Normalise: 0 = front, ±180
+        if doa > 180.0:
+            doa -= 360.0
+        half_range = self.angle_range / 2.0
+        abs_doa = abs(doa)
+
+        # Step 1: Move servo
+        pulse = self._angle_to_pulse(doa)
+        min_p = self.center_pulse - self.range_pulse
+        max_p = self.center_pulse + self.range_pulse
+        clamped = max(min_p, min(max_p, pulse))
+        self._publish_servo(clamped)
+        self.get_logger().info(
+            f"Voice cmd — DOA={doa:.0f}° → servo pulse={clamped:.0f}")
+
+        # Step 2: If servo saturated AND sound outside range, rotate robot
+        margin = 0.05 * self.range_pulse
+        at_limit = (clamped <= min_p + margin or clamped >= max_p - margin)
+        if at_limit and abs_doa > half_range:
+            direction = 1.0 if doa > 0 else -1.0
+            speed = direction * self.rotate_gain
+            self._publish_rotation(speed)
+            self.get_logger().info(
+                f"Servo saturated — rotating robot: angular_z={speed:.2f}")
+            # Schedule stop
+            if self._rotate_timer:
+                self._rotate_timer.cancel()
+            self._rotate_timer = self.create_timer(
+                self.rotate_duration, self._stop_rotate)
         else:
-            self._target_angle = msg.data
-            self._last_doa_time = self.get_clock().now().nanoseconds / 1e9
+            self._stop_rotation()
+
+    def _stop_rotate(self):
+        self._stop_rotation()
+        if self._rotate_timer:
+            self._rotate_timer.cancel()
+            self._rotate_timer = None
+
+    # ── Helpers ────────────────────────────────────────────────────
 
     def _angle_to_pulse(self, angle_deg: float) -> float:
-        """Map DOA angle to servo pulse width."""
-        # angle 0 = center, positive = clockwise (right)
         half_range = self.angle_range / 2.0
-        # Clamp to ±half_range
         clamped = max(-half_range, min(half_range, angle_deg))
-        # Normalize to [-1, 1]
         norm = clamped / half_range
         if self.invert:
             norm = -norm
@@ -85,39 +130,20 @@ class ServoTrackerNode(Node):
 
     def _publish_servo(self, pulse: float):
         msg = ServosPosition()
-        msg.duration = 0.15  # smooth movement
+        msg.duration = 0.15
         msg.position_unit = 'pulse'
-        servo = ServoPosition()
-        servo.id = self.servo_pan_id
-        servo.position = int(round(pulse))
-        msg.position = [servo]
+        s = ServoPosition()
+        s.id = self.servo_pan_id
+        s.position = float(pulse)
+        msg.position = [s]
         self._servo_pub.publish(msg)
         self._current_pulse = float(pulse)
 
-    def _control_loop(self):
-        now = self.get_clock().now().nanoseconds / 1e9
+    def _publish_rotation(self, az: float):
+        self._cmd_vel_pub.publish(Twist(angular=Vector3(x=0.0, y=0.0, z=az)))
 
-        # No DOA or stale → center
-        if self._target_angle is None or \
-           (now - self._last_doa_time) > self.center_timeout:
-            if abs(self._current_pulse - self.center_pulse) > 1.0:
-                self._publish_servo(self.center_pulse)
-                self.get_logger().info(f"ServoTracker: centering (no DOA)")
-            self._target_angle = None
-            return
-
-        # Compute target pulse
-        pulse = self._angle_to_pulse(self._target_angle)
-        pulse = max(float(self.center_pulse - self.range_pulse),
-                    min(float(self.center_pulse + self.range_pulse), pulse))
-
-        # Skip small changes (< 5 pulses) to avoid jitter
-        if abs(pulse - self._current_pulse) > 5.0:
-            self._publish_servo(pulse)
-            self.get_logger().info(
-                f"ServoTracker: DOA={self._target_angle:.0f}° → pulse={pulse:.0f}",
-                throttle_duration_sec=1.0,
-            )
+    def _stop_rotation(self):
+        self._publish_rotation(0.0)
 
 
 def main(args=None):

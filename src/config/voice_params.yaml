@@ -60,6 +60,6 @@ voice_doa:
     doa_pid: 24             # USB product ID (0x0018)
     angle_offset: 0.0       # 安装偏移量 (度)，正数=顺时针
     no_doa_value: 12        # XVF3000 报告无方向时的值 (仅 HID 后端)
-    backend: "hidraw"       # hidraw / hidapi (不要用 pyusb, 会踢掉 ALSA 驱动)
-    led_enable: false       # LED 需要 pyusb, 用 hidraw 时禁用
+    backend: "pyusb"        # pyusb / hidapi / hidraw (已修: 不 detach ALSA 驱动)
+    led_enable: false       # LED 需要 pyusb, 连 mic 时不用 led 省电
     led_brightness: 20      # LED 亮度 0-255

@@ -23,7 +23,12 @@ pip3 install sounddevice numpy scipy openai-whisper opencc-python-reimplemented 
 wget https://alphacephei.com/vosk/models/vosk-model-small-cn-0.22.zip
 unzip vosk-model-small-cn-0.22.zip -d ~/
 
-# 4. 编译（注意：astra_camera_msgs 是嵌套包，需 --paths 指定）
+# 4. USB 权限（DOA 需要 pyusb 访问 ReSpeaker）
+sudo cp scripts/99-respeaker.rules /etc/udev/rules.d/
+sudo udevadm control --reload-rules
+# 重新插拔 ReSpeaker USB
+
+# 5. 编译（注意：astra_camera_msgs 是嵌套包，需 --paths 指定）
 source /opt/ros/humble/setup.bash
 colcon build --symlink-install \
   --packages-select astra_camera_msgs --paths src/orbbec_ws/astra_camera_msgs
@@ -45,6 +50,21 @@ ReSpeaker (ALSA直连)
           → voice_hotword (双唤醒词 + Vosk语法匹配)
               ├── 小车小车 → Vosk 模式 (19短语, CPU)
               └── 小方小方 → ASR 直通 (→ Whisper GPU)
+
+声源定位 & 舵机跟随:
+  XVF3000 DOA (pyusb, 不踢ALSA)
+    → /voice/doa_angle
+      → servo_tracker (语音指令触发)
+          ├── 舵机转向声源 (/servo_controller)
+          └── 超范围 → cmd_vel 转动小车 (/cmd_vel)
+
+指令执行:
+  voice_hotword → /voice/voice_command
+    → voice_executor
+        ├── 电机: Twist → /cmd_vel (0.5s自动停)
+        ├── 舵机: ServosPosition → /servo_controller
+        ├── 蜂鸣: BuzzerState → /ros_robot_controller/set_buzzer
+        └── LED: ColorRGBA → /voice/status_led
 ```
 
 ## 启动

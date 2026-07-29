@@ -70,4 +70,22 @@ def generate_launch_description():
             parameters=[config_file],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
         ),
+        # 舵机声源跟踪 + 小车自动旋转
+        Node(
+            package='jetauto_app',
+            executable='servo_tracker',
+            name='servo_tracker',
+            output='screen',
+            parameters=[config_file],
+            arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+        ),
+        # 语音指令执行器
+        Node(
+            package='voice_executor',
+            executable='voice_executor_node',
+            name='voice_executor',
+            output='screen',
+            parameters=[config_file],
+            arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
+        ),
     ])

@@ -245,11 +245,12 @@ class XVF3000HID:
             dev = usb.core.find(idVendor=self._vid, idProduct=self._pid)
             if dev is None:
                 return False
-            if dev.is_kernel_driver_active(0):
-                try:
-                    dev.detach_kernel_driver(0)
-                except usb.core.USBError:
-                    pass
+            # 不 detach 任何内核驱动！ALSA 音频接口必须保留
+            # 靠 udev MODE=0666 权限直接做 vendor control transfer
+            try:
+                dev.set_configuration()
+            except usb.core.USBError:
+                pass
             self._usb_dev = dev
             return True
         except Exception:
