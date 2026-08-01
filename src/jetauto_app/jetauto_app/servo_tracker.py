@@ -17,10 +17,12 @@ Topics:
 
 Parameters (~servo_tracker):
   servo_pan_id     (int)   Pan servo ID           (default: 1)
-  center_pulse     (int)   Center position         (default: 1500)
-  range_pulse      (int)   Max deviation from centre (default: 1000)
+  center_pulse     (int)   Center position         (default: 500)
+  range_pulse      (int)   Max deviation from centre (default: 188)
   angle_range      (float) DOA range mapped to full servo range (default: 90.0)
   invert           (bool)  Reverse servo direction (default: false)
+  pulse_min        (int)   Hard lower pulse limit  (default: 312)
+  pulse_max        (int)   Hard upper pulse limit  (default: 688)
   rotate_gain      (float) Rotation speed (default: 0.3)
   rotate_duration  (float) Seconds to rotate before re-checking (default: 0.5)
 """
@@ -38,10 +40,12 @@ class ServoTrackerNode(Node):
         super().__init__('servo_tracker')
 
         self.servo_pan_id = self.declare_parameter('servo_pan_id', 1).value
-        self.center_pulse = self.declare_parameter('center_pulse', 1500).value
-        self.range_pulse = self.declare_parameter('range_pulse', 1000).value
+        self.center_pulse = self.declare_parameter('center_pulse', 500).value
+        self.range_pulse = self.declare_parameter('range_pulse', 188).value
         self.angle_range = self.declare_parameter('angle_range', 90.0).value
         self.invert = self.declare_parameter('invert', False).value
+        self.pulse_min = self.declare_parameter('pulse_min', 312).value
+        self.pulse_max = self.declare_parameter('pulse_max', 688).value
         self.rotate_gain = self.declare_parameter('rotate_gain', 0.3).value
         self.rotate_duration = self.declare_parameter('rotate_duration', 0.5).value
 
@@ -129,6 +133,8 @@ class ServoTrackerNode(Node):
         return self.center_pulse + norm * self.range_pulse
 
     def _publish_servo(self, pulse: float):
+        # 硬件硬限幅:总线舵机物理范围 [312, 688] (±45°),防止越界撞限位
+        pulse = max(float(self.pulse_min), min(float(self.pulse_max), pulse))
         msg = ServosPosition()
         msg.duration = 0.15
         msg.position_unit = 'pulse'

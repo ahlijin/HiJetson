@@ -89,7 +89,7 @@ HiJetson/
 │   ├── voice/                     # 语音模块包组
 │   │   ├── voice_capture/         # 音频采集节点 (sounddevice, 16kHz PCM)
 │   │   ├── voice_vad/             # 语音活动检测节点 (WebRTC VAD)
-│   │   ├── voice_wake_word/       # 唤醒词检测节点 (OpenWakeWord)
+│   │   ├── voice_hotword/         # 唤醒词检测节点 (Vosk 热词)
 │   │   ├── voice_asr/             # 语音识别节点 (openai-whisper, GPU加速)
 │   │   └── voice_msgs/            # 语音模块自定义消息
 │   ├── vision/                    # 视觉模块包组
@@ -158,7 +158,7 @@ capture → /voice/audio_raw
 | `/voice/audio_raw` | Float32MultiArray | voice_capture | 原始音频帧 (16kHz, float32) |
 | `/voice/voice_activity` | Bool | voice_vad | VAD 活动状态 |
 | `/voice/audio_clip` | Float32MultiArray | voice_vad | 完整的语音片段 |
-| `/voice/wake_word` | String | voice_wake_word | 唤醒词触发信号 |
+| `/voice/wake` | Bool | voice_hotword | 唤醒词触发信号 |
 | `/voice/asr_result` | String | voice_asr | ASR 转写结果 |
 | `/voice/voice_command` | VoiceCommand | voice_asr | 结构化语音命令 |
 
@@ -175,7 +175,7 @@ capture → /voice/audio_raw
 - [x] VAD 节点开发 (voice_vad)
 - [x] ASR 节点开发 - openai-whisper CUDA (voice_asr)
 - [x] 语音管线修复与性能调优（VAD误触发/高通滤波/ReSpeaker适配）
-- [x] 唤醒词检测节点开发 (voice_wake_word, OpenWakeWord)
+- [x] 唤醒词检测节点开发 (voice_hotword, Vosk 热词)
 - [ ] 图像预处理节点开发 (image_preprocess)
 - [ ] YOLOv8 + ONNX Runtime 检测节点开发 (object_detection)
 - [ ] 深度处理节点开发 (depth_processor)

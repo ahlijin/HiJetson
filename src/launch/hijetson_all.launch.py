@@ -49,9 +49,9 @@ def generate_launch_description():
 
             # 唤醒词检测
             Node(
-                package='voice_wake_word',
-                executable='voice_wake_word_node',
-                name='voice_wake_word',
+                package='voice_hotword',
+                executable='voice_hotword_node',
+                name='voice_hotword',
                 parameters=[config_file],
                 arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
                 output='screen',
@@ -154,12 +154,12 @@ def generate_launch_description():
             name='servo_tracker',
             parameters=[{
                 'servo_pan_id': 1,
-                'center_pulse': 1500,
-                'range_pulse': 1000,
+                'center_pulse': 500,
+                'range_pulse': 188,
                 'angle_range': 180.0,
                 'invert': False,
-                'center_timeout': 2.0,
-                'rate': 20.0,
+                'pulse_min': 312,
+                'pulse_max': 688,
             }],
             arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
             output='screen',
