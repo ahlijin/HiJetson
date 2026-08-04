@@ -2,16 +2,16 @@
 """
 servo_tracker_node.py
 
-Listens for voice commands (/voice/voice_command). On receiving a command,
-rotates the camera gimbal (servo) toward the latest DOA direction.
+Listens for wake events (/voice/wake). On wake, rotates the camera
+gimbal (servo) toward the latest DOA direction.
 If the sound source is beyond the servo's mechanical range (±45°),
 publishes cmd_vel to rotate the whole robot to face the sound.
 
-DOA data is read passively — rotation only happens on voice command.
+DOA data is read passively — rotation only happens on wake events.
 
 Topics:
   /voice/doa_angle       (Float32, sub)      — latest DOA angle
-  /voice/voice_command   (VoiceCommand, sub) — triggers rotation
+  /voice/wake            (Bool, sub)         — wake event triggers rotation
   /servo_controller      (ServosPosition, pub) — gimbal servo
   /cmd_vel               (Twist, pub)        — robot rotation
 
@@ -23,15 +23,16 @@ Parameters (~servo_tracker):
   invert           (bool)  Reverse servo direction (default: false)
   pulse_min        (int)   Hard lower pulse limit  (default: 312)
   pulse_max        (int)   Hard upper pulse limit  (default: 688)
-  rotate_gain      (float) Rotation speed (default: 0.3)
-  rotate_duration  (float) Seconds to rotate before re-checking (default: 0.5)
+  rotate_gain      (float) Rotation speed / open-loop timing (default: 0.3)
+  chase_timeout    (float) Max open-loop rotate duration (default: 10.0)
 """
 
+import time
+import math
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, Bool
 from geometry_msgs.msg import Twist, Vector3
-from voice_msgs.msg import VoiceCommand
 from ros_robot_controller_msgs.msg import ServosPosition, ServoPosition
 
 
@@ -47,7 +48,7 @@ class ServoTrackerNode(Node):
         self.pulse_min = self.declare_parameter('pulse_min', 312).value
         self.pulse_max = self.declare_parameter('pulse_max', 688).value
         self.rotate_gain = self.declare_parameter('rotate_gain', 0.3).value
-        self.rotate_duration = self.declare_parameter('rotate_duration', 0.5).value
+        self.chase_timeout = self.declare_parameter('chase_timeout', 10.0).value
 
         self._servo_pub = self.create_publisher(ServosPosition, '/servo_controller', 1)
         self._cmd_vel_pub = self.create_publisher(Twist, '/cmd_vel', 1)
@@ -55,11 +56,15 @@ class ServoTrackerNode(Node):
         # State
         self._current_pulse = float(self.center_pulse)
         self._latest_doa: float | None = None
+        self._latest_valid_doa: float | None = None
+        self._latest_locked_doa: float | None = None
         self._rotate_timer = None
 
         # Subscribers
         self.create_subscription(Float32, '/voice/doa_angle', self._doa_cb, 10)
-        self.create_subscription(VoiceCommand, '/voice/voice_command', self._cmd_cb, 10)
+        self.create_subscription(Float32, '/voice/doa_locked', self._locked_doa_cb, 10)
+        self.create_subscription(Bool, '/voice/vad_hw', self._vad_cb, 10)
+        self.create_subscription(Bool, '/voice/wake', self._wake_cb, 10)
 
         self.get_logger().info(
             f"ServoTracker started: servo={self.servo_pan_id}, "
@@ -67,19 +72,40 @@ class ServoTrackerNode(Node):
             f"({self.angle_range}°), rotate_gain={self.rotate_gain}"
         )
 
-    # ── DOA (passive — just store latest) ──────────────────────────
+    # ── DOA (passive — store latest; only trust value while voice active) ──
 
     def _doa_cb(self, msg: Float32):
         if msg.data >= 0:
             self._latest_doa = msg.data
 
-    # ── Voice command → rotate ─────────────────────────────────────
+    def _vad_cb(self, msg: Bool):
+        # 兜底: 语音期间的方向 (优先用 VAD 上升沿锁存值)
+        if msg.data and self._latest_doa is not None:
+            self._latest_valid_doa = self._latest_doa
 
-    def _cmd_cb(self, msg: VoiceCommand):
-        if self._latest_doa is None:
-            self.get_logger().info("No DOA data yet — skipping rotation")
+    def _locked_doa_cb(self, msg: Float32):
+        # 唤醒词方向: voice_doa 在 VAD 上升沿锁存并发布
+        if msg.data >= 0:
+            self._latest_locked_doa = msg.data
+
+    # ── Wake event → rotate toward sound ──────────────────────────
+
+    def _wake_cb(self, msg: Bool):
+        if not msg.data:
+            # 退出 / 自动休眠: 舵机回正, 停止旋转
+            self._cancel_chase()
+            self._stop_rotation()
+            self._publish_servo(float(self.center_pulse))
+            self.get_logger().info("Sleep — servo home, rotation stopped")
             return
-        self._rotate_to_doa(self._latest_doa)
+        doa = self._latest_locked_doa
+        if doa is None:
+            doa = self._latest_valid_doa  # 兜底: 语音期间方向
+        if doa is None:
+            self.get_logger().info(
+                "No valid DOA (no voice detected yet) — skipping rotation")
+            return
+        self._rotate_to_doa(doa)
 
     # ── Core rotation logic ────────────────────────────────────────
 
@@ -88,36 +114,42 @@ class ServoTrackerNode(Node):
         if doa > 180.0:
             doa -= 360.0
         half_range = self.angle_range / 2.0
-        abs_doa = abs(doa)
 
-        # Step 1: Move servo
-        pulse = self._angle_to_pulse(doa)
-        min_p = self.center_pulse - self.range_pulse
-        max_p = self.center_pulse + self.range_pulse
-        clamped = max(min_p, min(max_p, pulse))
-        self._publish_servo(clamped)
-        self.get_logger().info(
-            f"Voice cmd — DOA={doa:.0f}° → servo pulse={clamped:.0f}")
-
-        # Step 2: If servo saturated AND sound outside range, rotate robot
-        margin = 0.05 * self.range_pulse
-        at_limit = (clamped <= min_p + margin or clamped >= max_p - margin)
-        if at_limit and abs_doa > half_range:
-            direction = 1.0 if doa > 0 else -1.0
-            speed = direction * self.rotate_gain
-            self._publish_rotation(speed)
-            self.get_logger().info(
-                f"Servo saturated — rotating robot: angular_z={speed:.2f}")
-            # Schedule stop
-            if self._rotate_timer:
-                self._rotate_timer.cancel()
-            self._rotate_timer = self.create_timer(
-                self.rotate_duration, self._stop_rotate)
-        else:
+        if abs(doa) <= half_range:
+            # 声源在舵机范围内: 只转舵机对准, 不转车
+            self._cancel_chase()
+            self._publish_servo(self._angle_to_pulse(doa))
             self._stop_rotation()
+            self.get_logger().info(
+                f"Wake — DOA={doa:.0f}° → servo pulse={self._current_pulse:.0f}")
+            return
 
-    def _stop_rotate(self):
+        # 声源超出舵机范围: 整体旋转小车闭环追踪, 直到声源进入范围
+        self._start_chase(doa)
+
+    # ── Open-loop rotate (sound beyond servo range — servo untouched) ──
+
+    def _start_chase(self, doa: float):
+        if self._rotate_timer:
+            self._rotate_timer.cancel()
+        # 开环整体旋转: 转 doa 的最短角 (右=+ / 左=-), 舵机不动
+        rad = abs(doa) * math.pi / 180.0
+        duration = min(rad / self.rotate_gain, self.chase_timeout)
+        direction = -1.0 if doa > 0 else 1.0  # 右→右转(angular<0), 左→左转(angular>0)
+        self._publish_rotation(direction * self.rotate_gain)
+        self.get_logger().info(
+            f"DOA={doa:.0f}° beyond servo range — rotating robot "
+            f"{abs(doa):.0f}° ({duration:.1f}s), servo untouched")
+        self._rotate_timer = self.create_timer(duration, self._stop_chase)
+
+    def _stop_chase(self):
         self._stop_rotation()
+        if self._rotate_timer:
+            self._rotate_timer.cancel()
+            self._rotate_timer = None
+        self.get_logger().info("Rotation done — robot now faces the sound")
+
+    def _cancel_chase(self):
         if self._rotate_timer:
             self._rotate_timer.cancel()
             self._rotate_timer = None

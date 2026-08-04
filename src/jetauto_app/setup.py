@@ -25,6 +25,7 @@ setup(
         'console_scripts': [
             'lidar_controller = jetauto_app.lidar_controller:main',
             'servo_tracker = jetauto_app.servo_tracker:main',
+            'twist_to_motor_bridge = jetauto_app.twist_to_motor_bridge:main',
         ],
     },
 )

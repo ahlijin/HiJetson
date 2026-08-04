@@ -13,6 +13,7 @@ Three backends tried in order: pyusb → hidapi → hidraw.
 
 Topics published:
   /voice/doa_angle      (Float32)   DOA angle  0-360°
+  /voice/doa_locked     (Float32)   DOA locked at VAD rising edge (wake word direction)
   /voice/doa_direction  (String)    direction label
   /voice/vad_hw         (Bool)      hardware VAD status
 
@@ -341,8 +342,13 @@ class VoiceDOANode(Node):
 
         # ── Publishers ──
         self._angle_pub = self.create_publisher(Float32, '/voice/doa_angle', 10)
+        self._locked_pub = self.create_publisher(Float32, '/voice/doa_locked', 10)
         self._dir_pub = self.create_publisher(String, '/voice/doa_direction', 10)
         self._vad_pub = self.create_publisher(Bool, '/voice/vad_hw', 10)
+
+        # VAD 上升沿锁存状态 (唤醒词方向)
+        self._prev_vad: bool = False  # 初始 False: 第一轮语音即触发上升沿
+        self._locked_doa: float | None = None
 
         # ── Hardware interface ──
         self._hid = XVF3000HID(self.doa_vid, self.doa_pid, self.backend, self.get_logger().info)
@@ -458,7 +464,8 @@ class VoiceDOANode(Node):
                 if self._last_valid_doa is not None and (now - self._last_valid_time) > 1.0:
                     self._publish_none()
                 return
-            angle = (raw + self.angle_offset) % 360
+            # 镜像: 拾音器 DOA 递增方向与小车坐标系相反
+            angle = (self.angle_offset - raw) % 360
         else:
             if raw >= self.no_doa_value or raw > 11:
                 if self._last_valid_doa is not None and (now - self._last_valid_time) > 1.0:
@@ -468,6 +475,18 @@ class VoiceDOANode(Node):
 
         self._last_valid_doa = angle
         self._last_valid_time = now
+
+        # VAD 上升沿 → 锁定唤醒词方向 (语音开始瞬间的 DOA)
+        if vad is not None:
+            rising = (self._prev_vad is False) and (vad is True)
+            self._prev_vad = bool(vad)
+            if rising:
+                self._locked_doa = angle
+                msg_l = Float32()
+                msg_l.data = float(angle)
+                self._locked_pub.publish(msg_l)
+                self.get_logger().info(
+                    f"DOA locked (VAD rising): angle={angle:.0f}°")
 
         # Publish topics
         msg_a = Float32(); msg_a.data = float(angle)

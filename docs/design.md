@@ -278,9 +278,14 @@ XVF3000 USB HID → hidapi/hidraw → voice_doa_node → /voice/doa_angle
 |------|------|
 | 节点名 | `servo_tracker` |
 | 包 | `jetauto_app` |
-| 订阅 | `/voice/doa_angle` (Float32) |
-| 发布 | `/servo_controller` (ServosPosition) |
-| 映射 | DOA 0° → center_pulse, ±45° → full range (90°总视野) |
+| 订阅 | `/voice/doa_angle` (Float32)、`/voice/doa_locked` (Float32)、`/voice/vad_hw` (Bool)、`/voice/wake` (Bool) |
+| 发布 | `/servo_controller` (ServosPosition)、`/cmd_vel` (Twist) |
+| 触发 | **仅唤醒事件**（`/voice/wake=True`）。移动指令（前进/左转等）不再触发舵机/旋转 |
+| 方向数据 | 优先 VAD 上升沿锁存值（`/voice/doa_locked`，唤醒词方向）；无锁存时兜底 vad=True 期间的 DOA；无语音时 DOA 为漂移噪声，不采信 |
+| 行为 | DOA 在 ±45° 内 → 只转舵机对准；超出 ±45° → **开环整体旋转**（最短转角 ÷ rotate_gain 换算时长，转完即停，舵机不动） |
+| 回正 | 退出/自动休眠（`/voice/wake=False`）→ 舵机回正 center_pulse(500)、停止旋转 |
+| 校准 | DOA 为小车坐标系 0-360°（正前=0/右=90/左=270/后=180），由 voice_doa `angle_offset=270` 镜像换算（拾音器递增方向与小车相反） |
+| 参数 | `invert=true`、`rotate_gain=0.6`（唤醒旋转速度加倍）、`chase_timeout=10.0`（开环旋转时长上限） |
 
 ### 1.8 启动流程
 

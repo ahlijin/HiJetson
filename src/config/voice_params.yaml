@@ -58,7 +58,7 @@ voice_doa:
     poll_rate: 10           # DOA 轮询频率 (Hz)
     doa_vid: 10374          # USB vendor ID  (0x2886 = Seeed)
     doa_pid: 24             # USB product ID (0x0018)
-    angle_offset: 0.0       # 安装偏移量 (度)，正数=顺时针
+    angle_offset: 270.0     # 镜像校准(实测): car=(270-raw)%360 → 正前=0/右=90/左=270/后=180 (拾音器递增方向与小车相反)
     no_doa_value: 12        # XVF3000 报告无方向时的值 (仅 HID 后端)
     backend: "pyusb"        # pyusb / hidapi / hidraw (已修: 不 detach ALSA 驱动)
     led_enable: false       # LED 需要 pyusb, 连 mic 时不用 led 省电
@@ -67,9 +67,10 @@ voice_doa:
 servo_tracker:
   ros__parameters:
     servo_pan_id: 1
+    rotate_gain: 0.6         # 唤醒整车旋转角速度 (rad/s), 原0.3加倍
     center_pulse: 500        # 总线舵机中心 (0-1000 范围, 中心 500)
     range_pulse: 188         # ±188 ticks = 物理 ±45°
     angle_range: 90.0
-    invert: false
+    invert: true           # 舵机反装: 高脉冲=物理左, 低脉冲=物理右
     pulse_min: 312           # 物理下限 (±45°)
     pulse_max: 688           # 物理上限 (±45°)
