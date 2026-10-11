@@ -2,13 +2,13 @@
 """
 voice_feedback_node.py
 
-Multi-modal feedback on wake word / ASR events:
+Multi-modal feedback on wake / ASR events:
   - Audio tone  (through speaker / PulseAudio)
   - Buzzer beep (through STM32 / ros_robot_controller)
   - LED flash   (ReSpeaker pixel ring)
 
 Subscribes:
-  /voice/wake_word  (std_msgs/String)  — trigger wake feedback
+  /voice/wake       (std_msgs/Bool)    — True = 唤醒(触发反馈), False = 休眠(忽略)
   /voice/asr_result (std_msgs/String)  — trigger result beep
 
 Publishes:
@@ -28,7 +28,7 @@ Configuration (from voice_params.yaml):
 
 import rclpy
 from rclpy.node import Node
-from std_msgs.msg import String, ColorRGBA
+from std_msgs.msg import Bool, String, ColorRGBA
 from ros_robot_controller_msgs.msg import BuzzerState
 import numpy as np
 import sounddevice as sd
@@ -64,8 +64,8 @@ class VoiceFeedbackNode(Node):
         )
 
         # ── Subscribers ──
-        self._ww_sub = self.create_subscription(
-            String, '/voice/wake_word', self.wake_word_callback, 10
+        self._wake_sub = self.create_subscription(
+            Bool, '/voice/wake', self.wake_callback, 10
         )
         self._asr_sub = self.create_subscription(
             String, '/voice/asr_result', self.asr_result_callback, 10
@@ -77,10 +77,12 @@ class VoiceFeedbackNode(Node):
             f'led=({self._led_r},{self._led_g},{self._led_b})/{self._led_duration}s'
         )
 
-    # ── Feedback on wake word ──────────────────────────────────
+    # ── Feedback on wake (True = 唤醒) ─────────────────────────
 
-    def wake_word_callback(self, msg: String):
-        self.get_logger().info(f'🔊 Wake word feedback: "{msg.data}"')
+    def wake_callback(self, msg: Bool):
+        if not msg.data:
+            return
+        self.get_logger().info('🔊 Wake feedback')
 
         # 1) Audio tone through speaker
         self._play_tone(

@@ -201,8 +201,8 @@ ros2 node list && ros2 topic list
 
 ## 已知问题
 
-- `voice_feedback` 订阅的是 `/voice/wake_word`（String），而 `voice_hotword` 实际发布的是 `/voice/state`（String）→ 唤醒提示音当前不会被触发，话题名待统一
 - `src/launch/hijetson_all.launch.py` 与 `scripts/run_all.sh` 仍引用未实现的 `image_preprocess`、`object_detection` 包，直接运行会报找不到可执行文件
+- `/voice/state`（hotword 发布）、`/voice/voice_activity`（voice_vad 发布）目前无订阅方：前者是调试用状态文本，后者是能量 VAD 时代 ASR 门控的遗留，暂留着可 ros2 topic echo 观察
 
 ## 路线图
 
