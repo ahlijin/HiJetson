@@ -7,6 +7,11 @@
 - **main**: 开发分支，包含语音/视觉/SLAM/导航全套代码
 - **lite**: 存档分支，仅包含从 HiWonder_JetAuto 迁移的已验证 SLAM/导航代码（只读）
 
+## 仓库
+- origin: http://192.168.3.96:3000/legend/HiJetson.git （本地 gitea，NAS 与 github 在线仓库已弃用）
+- 子模块 `src/orbbec_ws` = legend/ros2_astra_camera（gitea）；`git clone --recurse-submodules` 拉取
+- 姊妹仓库: legend/HiWonder_JetAuto（Pi3 底层控制）
+
 ## 硬件平台
 - **核心计算**: NVIDIA Jetson Orin Nano 8GB (JetPack R36.5.0, Ubuntu 22.04)
 - **深度相机**: Orbbec Astra Pro (RGB 1080P + Depth 640×480)
@@ -18,9 +23,10 @@
 ```
 HiJetson/
 ├── src/
-│   ├── voice/               # 语音模块 (capture → VAD → ASR, 能量VAD + Whisper + opencc)
-│   ├── vision/              # 视觉模块 (depth_processor + 待补 object_detection)
+│   ├── voice/               # 语音模块 (8 包: capture/doa/vad/hotword/asr/executor/feedback/msgs)
+│   ├── vision/              # 视觉模块 (depth_processor + vision_msgs; image_preprocess/object_detection 待实现)
 │   ├── fusion/              # 多模态融合节点
+│   ├── jetauto_app/         # servo_tracker 声源跟随 / lidar_controller / twist_to_motor_bridge
 │   ├── slam/                # SLAM (slam_toolbox + rtabmap)
 │   ├── navigation/          # Nav2 自主导航
 │   ├── jetauto_peripherals/ # 舵机控制、键盘遥控、深度相机启动
@@ -36,14 +42,16 @@ HiJetson/
 ## 构建
 ```bash
 source /opt/ros/humble/setup.bash
-cd <workspace>
+cd ~/code/HiJetson          # 本地 clone 路径 (Pi5: /opt/data/code/HiJetson)
 colcon \
-  --log-base /root/build/HiJetson/log \
+  --log-base ~/build/HiJetson/log \
   build \
   --symlink-install \
-  --build-base /root/build/HiJetson/build \
-  --install-base /root/build/HiJetson/install \
+  --build-base ~/build/HiJetson/build \
+  --install-base ~/build/HiJetson/install \
   --cmake-args "-DCMAKE_C_COMPILER=/usr/bin/gcc" "-DCMAKE_CXX_COMPILER=/usr/bin/g++"
+# 注: /usr/local/bin/cc 被 Claude Code 占用，必须显式指定 gcc/g++；
+#     部署到 Jetson 不要用 --symlink-install（symlink 指本机路径，scp 后失效）
 ```
 
 ## 开发重点

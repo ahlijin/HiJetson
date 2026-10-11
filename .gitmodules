@@ -1,4 +1,4 @@
 
 [submodule "src/orbbec_ws"]
 	path = src/orbbec_ws
-	url = https://github.com/orbbec/ros2_astra_camera.git
+	url = http://192.168.3.96:3000/legend/ros2_astra_camera.git
