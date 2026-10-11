@@ -12,8 +12,8 @@
 ## 首次部署（Jetson Orin Nano）
 
 ```bash
-# 1. 克隆项目
-git clone https://github.com/ahlijin/HiJetson.git
+# 1. 克隆项目（含子模块: astra 驱动来自本地 gitea）
+git clone --recurse-submodules http://192.168.3.96:3000/legend/HiJetson.git
 cd HiJetson
 
 # 2. 安装依赖

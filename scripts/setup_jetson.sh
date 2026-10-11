@@ -72,18 +72,10 @@ pip3 install openai-whisper
 echo "   - 修复 numba/coverage 兼容性"
 pip3 install "coverage==6.5.0"
 
-# 5. Orbbec Astra Pro 驱动
+# 5. Orbbec Astra Pro 驱动 (git submodule, 来源为本地 gitea)
 echo ""
-echo ">>> [5/7] 安装 Orbbec Astra Pro 驱动..."
-if [ ! -d "src/orbbec_ws" ]; then
-    mkdir -p src/orbbec_ws
-fi
-
-cd src/orbbec_ws
-if [ ! -d "astra_camera" ]; then
-    git clone https://github.com/orbbec/ros2_astra_camera.git -b ros2 astra_camera
-fi
-cd ../..
+echo ">>> [5/7] 初始化 Orbbec Astra Pro 驱动子模块..."
+git submodule update --init --recursive src/orbbec_ws
 
 # 6. 下载 YOLOv8 模型
 echo ""
