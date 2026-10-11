@@ -40,18 +40,30 @@ HiJetson/
 ```
 
 ## 构建
+
+### 开发机：宿主 Pi5 的 my-ros docker 容器（实测可用）
+```bash
+docker run --rm \
+  -v /home/pi/hermes-data/code/HiJetson:/ws \
+  -v /home/pi/hermes-data/build/HiJetson:/out \
+  my-ros:latest bash -lc '
+    source /opt/ros/humble/setup.bash && cd /ws &&
+    colcon --log-base /out/log build --build-base /out/build --install-base /out/install \
+      --cmake-args -DCMAKE_C_COMPILER=/usr/bin/gcc -DCMAKE_CXX_COMPILER=/usr/bin/g++'
+# 镜像 my-ros:latest = ROS2 Humble + colcon (aarch64, Python 3.10)
+# 挂载必须传宿主机路径: Hermes 容器内 /opt/data == 宿主机 /home/pi/hermes-data
+# 只编指定包加 --packages-select <pkg>（astra_camera 是 C++ 大包，非必要别全编）
+# 产物落在 /out(=宿主机 /home/pi/hermes-data/build/HiJetson)，源码只读挂载更安全
+```
+
+### Jetson 上原生编译（部署用）
 ```bash
 source /opt/ros/humble/setup.bash
-cd ~/code/HiJetson          # 本地 clone 路径 (Pi5: /opt/data/code/HiJetson)
-colcon \
-  --log-base ~/build/HiJetson/log \
-  build \
-  --symlink-install \
-  --build-base ~/build/HiJetson/build \
-  --install-base ~/build/HiJetson/install \
+cd ~/HiJetson
+colcon build --symlink-install \
   --cmake-args "-DCMAKE_C_COMPILER=/usr/bin/gcc" "-DCMAKE_CXX_COMPILER=/usr/bin/g++"
-# 注: /usr/local/bin/cc 被 Claude Code 占用，必须显式指定 gcc/g++；
-#     部署到 Jetson 不要用 --symlink-install（symlink 指本机路径，scp 后失效）
+# 注: /usr/local/bin/cc 被 Claude Code 占用时必须显式指定 gcc/g++；
+#     若产物要 scp 到别处，不要用 --symlink-install（symlink 指本机路径，scp 后失效）
 ```
 
 ## 开发重点
