@@ -1,0 +1,23 @@
+name: Build
+on: [push]
+
+jobs:
+  build:
+    runs-on: pi5
+    steps:
+      - name: Clone
+        run: |
+          rm -rf /tmp/ws
+          git clone http://192.168.3.96:3000/legend/HiWonder_JetAuto.git /tmp/ws
+          cd /tmp/ws
+          git submodule update --init --recursive
+          git checkout ${{ github.sha }}
+
+      - name: Build in ros-dev
+        run: |
+          cd /tmp/ws
+          docker run --rm \
+            -v $PWD:/ws \
+            -w /ws \
+            my-ros \
+            bash -c "source /opt/ros/humble/setup.bash && colcon build"
