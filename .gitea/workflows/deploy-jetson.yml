@@ -27,7 +27,7 @@ jobs:
       - name: Package
         run: |
           cd /data/ws
-          tar czf /tmp/hijetson-deploy.tar.gz install/ scripts/start.sh
+          tar czf /tmp/hijetson-deploy.tar.gz -C /data/ws install  -C /data/ws/scripts start.sh
 
       - name: Deploy to Jetson
         run: |
