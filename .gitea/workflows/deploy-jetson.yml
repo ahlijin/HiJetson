@@ -26,7 +26,7 @@ jobs:
 
       - name: Package
         run: |
-          cd /home/pi/runner-data/ws
+          cd /data/ws
           tar czf /tmp/hijetson-deploy.tar.gz install/ scripts/start.sh
 
       - name: Deploy to Jetson
