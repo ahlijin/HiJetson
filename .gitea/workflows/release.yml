@@ -49,13 +49,12 @@ jobs:
           fi
           
           # 2. 判断是否为预发布
-          if echo "${VERSION}" | grep -qE '-(alpha|beta|rc)'; then
-            PRERELEASE=true
-            echo "标记为 pre-release: ${VERSION}"
-          else
-            PRERELEASE=false
-          fi
-          
+          PRERELEASE=false
+          case "${VERSION}" in
+            *-alpha*|*-beta*|*-rc*) PRERELEASE=true ;;
+          esac
+          echo "prerelease=${PRERELEASE}"
+
           # 3. 创建 Release
           curl -sSf -X POST "http://192.168.3.96:3000/api/v1/repos/legend/HiJetson/releases" \
             -H "Authorization: token ${{ secrets.GITEA_TOKEN }}" \
