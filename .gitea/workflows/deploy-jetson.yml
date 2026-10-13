@@ -1,0 +1,39 @@
+name: Build and Deploy Jetson ROS
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-deploy:
+    runs-on: pi5
+    steps:
+      - name: Clone
+        run: |
+          rm -rf /data/ws
+          git clone http://192.168.3.96:3000/legend/HiJetson.git /data/ws
+          cd /data/ws
+          git fetch origin ${{ github.ref_name }}
+          git checkout ${{ github.sha }}
+          git submodule update --init --recursive
+
+      - name: Build ROS
+        run: |
+          docker run --rm \
+            -v /home/pi/runner-data/ws:/ws \
+            -w /ws \
+            my-ros:latest \
+            bash -c "source /opt/ros/humble/setup.bash && colcon build"
+
+      - name: Package
+        run: |
+          cd /home/pi/runner-data/ws
+          tar czf /tmp/hijetson-deploy.tar.gz install/ scripts/start.sh
+
+      - name: Deploy to Jetson
+        run: |
+          ssh nvidia@192.168.3.78 "sudo rm -rf /opt/hijetson/install /opt/hijetson/start.sh"
+          scp /tmp/hijetson-deploy.tar.gz nvidia@192.168.3.78:/tmp/
+          ssh nvidia@192.168.3.78 "sudo tar xzf /tmp/hijetson-deploy.tar.gz -C /opt/hijetson/ && rm /tmp/hijetson-deploy.tar.gz"
+          ssh nvidia@192.168.3.78 "sudo chmod +x /opt/hijetson/start.sh && sudo chown -R nvidia:nvidia /opt/hijetson"
+          ssh nvidia@192.168.3.78 "cd /home/nvidia/hijetson && docker compose up -d --force-recreate"
+          ssh nvidia@192.168.3.78 "docker ps | grep hijetson-ros"
