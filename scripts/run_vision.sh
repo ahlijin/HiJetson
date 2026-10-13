@@ -1,7 +1,10 @@
 #!/bin/bash
 #==============================================================================
 # HiJetson 视觉模块启动脚本
-# 仅启动: 图像采集 + 预处理 + YOLO + 深度处理
+# Astra Pro 相机 + 深度处理（= hijetson_vision.launch.py）
+#
+# 注：原脚本手工 ros2 run 了 image_preprocess / object_detection 两个本仓库不存在的包，
+#     已统一改为走 hijetson_bringup 的 launch（那两个模块等实现后再加回 launch 里）。
 #==============================================================================
 
 set -e
@@ -15,32 +18,17 @@ fi
 
 if [ -f "$WORKSPACE_DIR/install/setup.bash" ]; then
     source "$WORKSPACE_DIR/install/setup.bash"
+elif [ -f /opt/hijetson/install/setup.bash ]; then
+    source /opt/hijetson/install/setup.bash
+else
+    echo "错误：找不到 install/setup.bash（先在 $WORKSPACE_DIR 里 colcon build）" >&2
+    exit 1
 fi
 
-echo ">>> 启动 Astra Pro 相机..."
-ros2 launch astra_camera astra_pro.launch.py \
-    color_width:=1280 color_height:=720 color_fps:=30 \
-    enable_depth:=true &
-PID1=$!
-sleep 3
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
 
-echo ">>> 启动图像预处理..."
-ros2 run image_preprocess image_preprocess_node &
-PID2=$!
-sleep 1
+echo ">>> 启动视觉模块 (Astra Pro 相机 + 深度处理)"
+echo "    ROS_DOMAIN_ID=$ROS_DOMAIN_ID，按 Ctrl+C 停止"
+echo ""
 
-echo ">>> 启动 YOLOv8 检测..."
-ros2 run object_detection object_detection_node --ros-args -p conf_threshold:=0.5 &
-PID3=$!
-sleep 1
-
-echo ">>> 启动深度处理器..."
-ros2 run depth_processor depth_processor_node &
-PID4=$!
-
-echo "视觉模块已启动"
-echo "按 Ctrl+C 停止"
-
-cleanup() { kill $PID1 $PID2 $PID3 $PID4 2>/dev/null; exit 0; }
-trap cleanup SIGINT SIGTERM
-wait
+exec ros2 launch hijetson_bringup hijetson_vision.launch.py "$@"

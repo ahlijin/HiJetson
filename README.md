@@ -111,12 +111,15 @@ XVF3000 DOA (pyusb 直读, 不 detach ALSA) → voice_doa
 HiJetson/
 ├── README.md
 ├── CLAUDE.md                      # CC 项目上下文
-├── Changelog/                     # 版本日志（当前最新 0.9.9）
+├── Changelog/                     # 版本日志（当前最新 0.9.11）
 ├── docs/
 │   ├── design.md                  # 详细设计（模块/消息/话题/性能）
 │   └── deployment.md              # 部署指南（安装/启动/使用）
 ├── scripts/
-│   ├── setup_jetson.sh            # 一键环境安装
+│   ├── Dockerfile.my-ros          # 运行镜像（gitea registry 基线 + 语音/USB 依赖 + 国内源）
+│   ├── docker-compose.yml         # 设备侧运行配置（/dev:/dev + privileged + host 网络）
+│   ├── start.sh                   # 容器主进程：决定启动哪个管线（改这里，不改 compose）
+│   ├── setup_jetson.sh            # 一键环境安装（宿主机原生老流程，默认切国内源）
 │   ├── setup_respeaker.sh         # ReSpeaker 权限设置
 │   ├── 99-respeaker.rules         # ReSpeaker udev 规则（DOA 需要）
 │   ├── download_models.sh         # 模型下载（Vosk / Whisper）
@@ -127,8 +130,7 @@ HiJetson/
 │   ├── respeaker_asr_test.py      # 唤醒词 + ASR 独立测试
 │   └── clean.sh                   # 清理
 └── src/
-    ├── config/                    # voice_params.yaml / vision_params.yaml / system_params.yaml
-    ├── launch/                    # hijetson_voice / hijetson_vision / hijetson_all.launch.py
+    ├── hijetson_bringup/          # 启动包：hijetson_{voice,vision,all}.launch.py + config/*.yaml
     ├── voice/                     # 语音包组（8 个包，见上表）
     ├── vision/                    # depth_processor / vision_msgs（+2 个未实现包）
     ├── fusion/                    # fusion_node / fusion_msgs
@@ -170,6 +172,17 @@ HiJetson/
 
 ## 快速启动
 
+### 方式 A：容器（2026-10 起，推荐 —— 宿主已是 Ubuntu 24.04，Humble 只在容器里）
+```bash
+# 设备上（Jetson）
+cd /home/nvidia/hijetson
+docker compose pull && docker compose up -d --force-recreate   # 拉起/更新容器
+docker compose logs -f                                        # 看管线日志
+# 启动哪个管线：改 /opt/hijetson/start.sh 顶部的 LAUNCH=（compose 只管跑这个脚本）
+#   临时换：docker compose run --rm -e HIJETSON_LAUNCH=shell hijetson-ros
+```
+
+### 方式 B：源码就地编译运行（开发机 / 老 22.04 宿主机）
 ```bash
 # 0. 克隆（含子模块）
 git clone --recurse-submodules http://192.168.3.96:3000/legend/HiJetson.git
@@ -182,8 +195,8 @@ source install/setup.bash
 export ROS_DOMAIN_ID=42          # 与 Pi3 一致
 
 # 2. 启动语音管线（含唤醒词、DOA、指令执行）
-ros2 launch src/launch/hijetson_voice.launch.py
-# 或：bash scripts/run_voice.sh
+ros2 launch hijetson_bringup hijetson_voice.launch.py
+# 或：bash scripts/run_voice.sh     （视觉：run_vision.sh；全量：run_all.sh）
 ```
 
 说 **小车小车**（Vosk 短语模式）或 **小方小方**（ASR 直通）唤醒，**退出** 休眠。
@@ -197,11 +210,13 @@ ros2 topic echo /voice/state
 ros2 node list && ros2 topic list
 ```
 
-参数集中在 `src/config/voice_params.yaml`（采集 / VAD / 热词 / ASR / DOA / servo_tracker）。
+参数集中在 `hijetson_bringup` 包的 `config/voice_params.yaml`（采集 / VAD / 热词 / ASR / DOA / servo_tracker），
+安装后在 `install/hijetson_bringup/share/hijetson_bringup/config/`。
 
 ## 已知问题
 
-- `src/launch/hijetson_all.launch.py` 与 `scripts/run_all.sh` 仍引用未实现的 `image_preprocess`、`object_detection` 包，直接运行会报找不到可执行文件
+- `image_preprocess`、`object_detection` 两个视觉包尚未实现（`hijetson_vision/all.launch.py` 里已移除引用并留 TODO）
+- 容器镜像目前只装了语音/USB 运行依赖；`whisper`(PyTorch CUDA)、`vosk`、`onnxruntime-gpu` 未进镜像 → 容器里 `voice_asr` 会因缺 whisper 退出、`voice_hotword` 缺 vosk 降级（不影响 capture/vad/doa/feedback/tracker）
 - `/voice/state`（hotword 发布）、`/voice/voice_activity`（voice_vad 发布）目前无订阅方：前者是调试用状态文本，后者是能量 VAD 时代 ASR 门控的遗留，暂留着可 ros2 topic echo 观察
 
 ## 路线图

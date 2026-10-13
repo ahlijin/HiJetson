@@ -303,7 +303,7 @@ XVF3000 USB HID → hidapi/hidraw → voice_doa_node → /voice/doa_angle
 
 ```bash
 # 启动所有语音节点
-ros2 launch src/launch/hijetson_voice.launch.py
+ros2 launch hijetson_bringup hijetson_voice.launch.py
 
 # 查看识别结果
 ros2 topic echo /voice/asr_result

@@ -1,0 +1,49 @@
+# HiJetson 运行时镜像（Jetson Orin Nano / JetPack 7 + Ubuntu 24.04 宿主机 → 容器内跑 ROS2 Humble）
+#
+# 基线：gitea registry 里的 ros:humble-ros-base + colcon 构建工具镜像（:ros-humble-base-20260621）
+# 本文件在其上追加"语音/USB 运行时依赖"，让 ReSpeaker 麦克风阵列 / DOA / LED 环在容器里可用。
+#
+# 构建（在 Jetson 上，基线镜像已在本地/registry）：
+#   docker build -f scripts/Dockerfile.my-ros -t 192.168.3.96:3000/legend/my-ros:latest .
+#   docker push 192.168.3.96:3000/legend/my-ros:latest
+#
+# 国内网络：apt + pip 全部走中科大（USTC）镜像 —— 官方源实测 apt 一步十几分钟，镜像 3 秒
+
+FROM 192.168.3.96:3000/legend/my-ros:ros-humble-base-20260621
+LABEL org.opencontainers.image.description="ros:humble-ros-base + colcon 构建工具 + 语音/USB 运行依赖(ReSpeaker 麦克风阵列 / DOA / LED 环)"
+LABEL org.opencontainers.image.source="http://192.168.3.96:3000/legend"
+
+# 1) 换国内源（USTC）+ apt 超时约束
+#    - apt: ubuntu-ports（arm64 官方源国内极慢）+ ROS 源都换 USTC
+#    - ROS 源要改成 `Types: deb`：USTC/清华**都没有** jammy 的 deb-src 索引（实测 404），
+#      留着 deb-src 会让 apt-get update 直接失败（package.ros.org 官方源则慢/会卡住）
+#    - pip: USTC PyPI 镜像
+#    - ForceIPv4/Retries/Timeout：否则镜像某个 IP 不可达时会静默挂几十分钟
+RUN set -eux; \
+    for f in $(find /etc/apt -name '*.list' -o -name '*.sources' 2>/dev/null); do \
+        sed -i \
+          -e 's|http://ports.ubuntu.com/ubuntu-ports|https://mirrors.ustc.edu.cn/ubuntu-ports|g' \
+          -e 's|http://packages.ros.org/ros2/ubuntu|https://mirrors.ustc.edu.cn/ros2/ubuntu|g' \
+          -e 's|^Types: deb deb-src$|Types: deb|' \
+          "$f"; \
+    done; \
+    printf '[global]\nindex-url = https://mirrors.ustc.edu.cn/pypi/simple\ntrusted-host = mirrors.ustc.edu.cn\n' > /etc/pip.conf; \
+    printf 'Acquire::ForceIPv4 "true";\nAcquire::Retries "3";\nAcquire::http::Timeout "15";\nAcquire::https::Timeout "15";\n' > /etc/apt/apt.conf.d/99-hermes-timeout
+
+# 2) 运行依赖：基础镜像里没有 pip3；sounddevice 需要系统 libportaudio2；
+#    hidapi 是 C 扩展，需要 libusb-1.0-0-dev(镜像里已有) 与 libudev-dev
+RUN set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends \
+        python3-pip \
+        libportaudio2 \
+        alsa-utils \
+        libusb-1.0-0 \
+        libudev-dev; \
+    rm -rf /var/lib/apt/lists/*; \
+    python3 -m pip install --no-cache-dir sounddevice pyusb pixel-ring; \
+    python3 -m pip install --no-cache-dir hidapi || echo "hidapi 未装上(可选): voice_doa 会退回 pyusb/hidraw 后端"
+
+# 3) 自检：导入失败就直接让构建失败
+RUN python3 -c "import sounddevice, usb.core, pixel_ring, hid; print('audio/usb deps OK (含 hid)')" \
+    || python3 -c "import sounddevice, usb.core, pixel_ring; print('audio/usb deps OK (缺 hid, 无 LED ring/HID 后端)')"

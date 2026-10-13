@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>hijetson_bringup</name>
+  <version>0.1.0</version>
+  <description>HiJetson 启动编排包：语音/视觉/融合的 launch 文件 + 参数 yaml（原 src/launch + src/config，纳入包后才能随部署产物一起进容器）</description>
+  <maintainer email="ahlijin@163.com">ahlijin</maintainer>
+  <license>Apache-2.0</license>
+
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+
+  <!-- 被 launch 文件启动的各模块 -->
+  <exec_depend>voice_capture</exec_depend>
+  <exec_depend>voice_vad</exec_depend>
+  <exec_depend>voice_hotword</exec_depend>
+  <exec_depend>voice_feedback</exec_depend>
+  <exec_depend>voice_asr</exec_depend>
+  <exec_depend>voice_doa</exec_depend>
+  <exec_depend>voice_executor</exec_depend>
+  <exec_depend>jetauto_app</exec_depend>
+  <exec_depend>jetauto_peripherals</exec_depend>
+  <exec_depend>depth_processor</exec_depend>
+  <exec_depend>fusion_node</exec_depend>
+
+  <test_depend>ament_lint_auto</test_depend>
+  <test_depend>ament_lint_common</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

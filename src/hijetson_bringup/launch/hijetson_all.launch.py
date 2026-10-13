@@ -1,27 +1,47 @@
 """
 hijetson_all.launch.py
 
-HiJetson 完整启动文件
-启动所有语音、视觉和融合节点
+HiJetson 完整启动：Astra Pro 相机 + 语音链路 + 深度处理 + 融合 + 声源跟踪
+参数从 config/voice_params.yaml 加载（随本包安装到 share/hijetson_bringup/config/）
+
+用法：
+    source /opt/ros/humble/setup.bash && source /opt/hijetson/install/setup.bash
+    ros2 launch hijetson_bringup hijetson_all.launch.py
+
+注意（2026-10 整理）：
+  - 原来引用的 image_preprocess / object_detection 两个包本仓库并不存在，已移除（见 TODO）
+  - voice_executor（真正执行移动指令的节点）**没有**包含在这里，需要时单开 hijetson_voice.launch.py
+    或自己加进来，避免一启动就整车动
 """
 
 import os
+
+from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, GroupAction
+from launch.actions import DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node, PushRosNamespace
 
 
 def generate_launch_description():
-    # 获取 config 文件路径
-    launch_dir = os.path.dirname(os.path.realpath(__file__))
-    config_file = os.path.join(launch_dir, '..', 'config', 'voice_params.yaml')
-    config_file = os.path.abspath(config_file)
+    config_file = os.path.join(
+        get_package_share_directory('hijetson_bringup'), 'config', 'voice_params.yaml')
+
+    # 相机放在根命名空间（与 scripts/run_*.sh 以前的做法一致：/camera/... 话题）
+    camera_launch = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(
+            get_package_share_directory('jetauto_peripherals'),
+            'launch', 'depth_camera.launch.py')),
+    )
 
     return LaunchDescription([
         # ===== 全局参数 =====
         DeclareLaunchArgument('use_sim_time', default_value='false'),
         DeclareLaunchArgument('log_level', default_value='info'),
+
+        # ===== 相机 (Astra Pro) =====
+        camera_launch,
 
         # ===== 语音模块 =====
         GroupAction([
@@ -92,36 +112,10 @@ def generate_launch_description():
         GroupAction([
             PushRosNamespace('vision'),
 
-            # 图像预处理
-            Node(
-                package='image_preprocess',
-                executable='image_preprocess_node',
-                name='image_preprocess',
-                parameters=[{
-                    'input_width': 640,
-                    'input_height': 640,
-                }],
-                arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
-                output='screen',
-            ),
-
-            # 目标检测 (YOLO)
-            Node(
-                package='object_detection',
-                executable='object_detection_node',
-                name='object_detection',
-                parameters=[{
-                    'model_path': os.path.join(
-                        os.path.dirname(__file__), '..', 'models', 'yolo', 'yolov8n.onnx'
-                    ),
-                    'conf_threshold': 0.5,
-                    'iou_threshold': 0.45,
-                    'input_width': 640,
-                    'input_height': 640,
-                }],
-                arguments=['--ros-args', '--log-level', LaunchConfiguration('log_level')],
-                output='screen',
-            ),
+            # TODO: 图像预处理 / YOLO 检测（image_preprocess / object_detection 尚未实现，
+            #       原 launch 里引用了它们，必然报 package not found，先移除以保证能起）
+            # Node(package='image_preprocess', executable='image_preprocess_node', ...),
+            # Node(package='object_detection', executable='object_detection_node', ...),
 
             # 深度处理
             Node(

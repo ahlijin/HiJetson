@@ -1,9 +1,8 @@
 #!/bin/bash
 #==============================================================================
 # HiJetson 语音模块启动脚本
-# 使用 ROS2 launch 文件启动语音采集 + VAD + 唤醒词 + 反馈提示音 + ASR
-#
-# capture 和 feedback 都走 PulseAudio 默认设备，无需手动释放麦克风。
+# 采集 → VAD → 唤醒词 → 反馈音 → ASR → DOA → 声源跟踪 → 指令执行
+# 参数在 hijetson_bringup 包的 config/voice_params.yaml
 #==============================================================================
 
 set -e
@@ -15,14 +14,20 @@ if [ -z "$ROS_DISTRO" ]; then
     source /opt/ros/humble/setup.bash 2>/dev/null || true
 fi
 
+# 工作空间：优先用仓库里的 install，其次是部署形态 /opt/hijetson
 if [ -f "$WORKSPACE_DIR/install/setup.bash" ]; then
     source "$WORKSPACE_DIR/install/setup.bash"
+elif [ -f /opt/hijetson/install/setup.bash ]; then
+    source /opt/hijetson/install/setup.bash
+else
+    echo "错误：找不到 install/setup.bash（先在 $WORKSPACE_DIR 里 colcon build）" >&2
+    exit 1
 fi
 
-echo ">>> 启动语音模块 (采集 -> VAD -> 唤醒词 -> 反馈音 -> ASR) ..."
-echo "    模型: whisper small (CUDA)"
-echo "    全部走 PulseAudio 默认设备 (输入+输出都走PA)"
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-42}"
+
+echo ">>> 启动语音模块 (采集 -> VAD -> 唤醒词 -> 反馈音 -> ASR -> DOA -> servo_tracker -> executor)"
+echo "    ROS_DOMAIN_ID=$ROS_DOMAIN_ID"
 echo ""
 
-exec env PULSE_SERVER=/run/user/1000/pulse/native \
-    ros2 launch "$WORKSPACE_DIR/src/launch/hijetson_voice.launch.py"
+exec ros2 launch hijetson_bringup hijetson_voice.launch.py "$@"

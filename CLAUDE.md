@@ -13,10 +13,10 @@
 - 姊妹仓库: legend/HiWonder_JetAuto（Pi3 底层控制）
 
 ## 硬件平台
-- **核心计算**: NVIDIA Jetson Orin Nano 8GB (JetPack R36.5.0, Ubuntu 22.04)
+- **核心计算**: NVIDIA Jetson Orin Nano 8GB（宿主已升级到 JetPack 7 / Ubuntu 24.04；ROS2 Humble 跑在 docker 容器里，见 `scripts/Dockerfile.my-ros`）
 - **深度相机**: Orbbec Astra Pro (RGB 1080P + Depth 640×480)
 - **麦克风阵列**: ReSpeaker Mic Array v2.0 (XVF3000, USB Audio + HID DOA, 板载波束成形+降噪)
-- **底层**: CUDA 12.6 + TensorRT 10.7 + ROS2 Humble
+- **底层**: 容器内 Ubuntu 22.04 + ROS2 Humble（宿主 CUDA/TensorRT 通过 `--runtime nvidia` 供容器用）
 - **通信**: ROS_DOMAIN_ID=42, 与 Pi3 协同
 
 ## 项目结构
@@ -32,11 +32,19 @@ HiJetson/
 │   ├── jetauto_peripherals/ # 舵机控制、键盘遥控、深度相机启动
 │   ├── interfaces/          # 坐标/位姿消息定义
 │   ├── ros_robot_controller_msgs/ # 控制板消息 (与 Pi3 共享)
-│   ├── config/              # 配置文件
-│   ├── launch/              # 启动文件
+│   ├── hijetson_bringup/    # 启动包: launch 文件 + config/*.yaml (2026-10 起，原来是裸的 src/launch + src/config)
 │   └── orbbec_ws/           # Orbbec Astra Pro 驱动 (submodule)
-├── scripts/                 # 部署与运行脚本
+├── scripts/                 # 部署与运行脚本 (start.sh 是容器主进程; Dockerfile.my-ros / docker-compose.yml 也在这)
 └── docs/                    # 设计文档
+```
+
+## 运行（容器方式，2026-10 起）
+```bash
+# 设备上（Jetson）：CI 推送 main 自动部署 install/ + start.sh 到 /opt/hijetson，再由容器跑起来
+cd /home/nvidia/hijetson
+docker compose pull && docker compose up -d --force-recreate   # 拉起/更新
+docker compose logs -f                                        # 看管线日志
+# 启动哪个管线改 /opt/hijetson/start.sh 顶部 LAUNCH= 一行（compose 不掺业务）
 ```
 
 ## 构建
@@ -56,14 +64,17 @@ docker run --rm \
 # 产物落在 /out(=宿主机 /home/pi/hermes-data/build/HiJetson)，源码只读挂载更安全
 ```
 
-### Jetson 上原生编译（部署用）
+### Jetson 上原生编译（已废弃：宿主升级到 Ubuntu 24.04 后装不了 Humble）
 ```bash
+# 老流程（JetPack 6 / Ubuntu 22.04 时）：
 source /opt/ros/humble/setup.bash
 cd ~/HiJetson
 colcon build --symlink-install \
   --cmake-args "-DCMAKE_C_COMPILER=/usr/bin/gcc" "-DCMAKE_CXX_COMPILER=/usr/bin/g++"
-# 注: /usr/local/bin/cc 被 Claude Code 占用时必须显式指定 gcc/g++；
-#     若产物要 scp 到别处，不要用 --symlink-install（symlink 指本机路径，scp 后失效）
+# 现在请用容器：scripts/Dockerfile.my-ros 提供镜像，CI 推送自动编译+部署
+# 手工编译可用上面的"开发机 my-ros 容器"方式，或直接在设备上：
+#   docker run --rm -v $PWD:/ws -w /ws my-ros:latest bash -c \
+#     "source /opt/ros/humble/setup.bash && colcon build"
 ```
 
 ## 开发重点

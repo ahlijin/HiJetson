@@ -1,0 +1,26 @@
+# HiJetson 运行容器（设备侧副本在 /home/nvidia/hijetson/docker-compose.yml，两处保持一致）
+#
+# 用法：
+#   docker compose pull && docker compose up -d --force-recreate   # 拉最新镜像并重建
+#   docker compose logs -f                                          # 看管线日志
+#
+# 容器只负责"跑 /opt/hijetson/start.sh"：启动哪个管线由 start.sh 决定（改脚本，不改 compose）
+services:
+  hijetson-ros:
+    # 直接用 gitea registry 的镜像：以后更新镜像只要 build+push，这边 pull 就行
+    image: 192.168.3.96:3000/legend/my-ros:latest
+    container_name: hijetson-ros
+    restart: unless-stopped
+    # ROS2 DDS 跨设备通信（与 Pi3 的 ROS_DOMAIN_ID=42 一致）需要 host 网络
+    network_mode: host
+    # USB 音频/相机(ALSA + libusb)、I2C、GPU 等硬件访问
+    privileged: true
+    environment:
+      - ROS_DOMAIN_ID=42
+    volumes:
+      # 关键：不挂 /dev 的话，容器的 /dev 是"启动那一刻的快照"，
+      # 之后插入/重新枚举的 USB 设备(相机、麦克风阵列)容器里看不到
+      - /dev:/dev
+      # CI 部署产物（install/ + start.sh）
+      - /opt/hijetson:/opt/hijetson
+    command: ["bash", "-c", "chmod +x /opt/hijetson/start.sh && /opt/hijetson/start.sh"]

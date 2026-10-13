@@ -6,6 +6,7 @@ on:
 jobs:
   build-deploy:
     runs-on: pi5
+    timeout-minutes: 30
     steps:
       - name: Clone
         run: |
@@ -27,13 +28,40 @@ jobs:
       - name: Package
         run: |
           cd /data/ws
-          tar czf /tmp/hijetson-deploy.tar.gz -C /data/ws install  -C /data/ws/scripts start.sh
+          tar czf /tmp/hijetson-deploy.tar.gz \
+            -C /data/ws install \
+            -C /data/ws/scripts start.sh
+          ls -lh /tmp/hijetson-deploy.tar.gz
 
-      - name: Deploy to Jetson
+      # 先传到 Jetson 并解到暂存目录；此时容器里跑的还是旧代码，下载/解包/校验任何一步失败都不影响设备
+      - name: Stage on Jetson
         run: |
-          ssh nvidia@192.168.3.78 "sudo rm -rf /opt/hijetson/install /opt/hijetson/start.sh"
-          scp /tmp/hijetson-deploy.tar.gz nvidia@192.168.3.78:/tmp/
-          ssh nvidia@192.168.3.78 "sudo tar xzf /tmp/hijetson-deploy.tar.gz -C /opt/hijetson/ && rm /tmp/hijetson-deploy.tar.gz"
-          ssh nvidia@192.168.3.78 "sudo chmod +x /opt/hijetson/start.sh && sudo chown -R nvidia:nvidia /opt/hijetson"
-          ssh nvidia@192.168.3.78 "cd /home/nvidia/hijetson && docker compose up -d --force-recreate"
-          ssh nvidia@192.168.3.78 "docker ps | grep hijetson-ros"
+          SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new nvidia@192.168.3.78"
+          scp -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new /tmp/hijetson-deploy.tar.gz nvidia@192.168.3.78:/tmp/
+          $SSH "sudo rm -rf /opt/hijetson/.staging && sudo mkdir -p /opt/hijetson/.staging"
+          $SSH "sudo tar xzf /tmp/hijetson-deploy.tar.gz -C /opt/hijetson/.staging && rm -f /tmp/hijetson-deploy.tar.gz"
+          $SSH "sudo test -f /opt/hijetson/.staging/install/setup.bash && sudo test -f /opt/hijetson/.staging/start.sh && echo 'staging OK'"
+
+      - name: Stop container
+        run: |
+          ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new nvidia@192.168.3.78 "cd /home/nvidia/hijetson && docker compose stop || true"
+
+      # 原子替换: 旧 install 留成 install.old(回退用), mv 是同文件系统内的 rename
+      - name: Swap in new install
+        run: |
+          SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new nvidia@192.168.3.78"
+          $SSH "sudo rm -rf /opt/hijetson/install.old && sudo mv /opt/hijetson/install /opt/hijetson/install.old && sudo mv /opt/hijetson/.staging/install /opt/hijetson/install && sudo mv -f /opt/hijetson/.staging/start.sh /opt/hijetson/start.sh && sudo rm -rf /opt/hijetson/.staging && sudo chmod +x /opt/hijetson/start.sh && sudo chown -R nvidia:nvidia /opt/hijetson && echo 'swap done'"
+
+      - name: Start container
+        run: |
+          SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new nvidia@192.168.3.78"
+          $SSH "cd /home/nvidia/hijetson && docker compose up -d --force-recreate"
+
+      # 校验真的在运行: 崩溃重启循环的容器也会出现在 docker ps 里，所以要查 State.Running
+      - name: Verify on Jetson
+        run: |
+          SSH="ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new nvidia@192.168.3.78"
+          sleep 8
+          $SSH "test -f /opt/hijetson/install/setup.bash || { echo 'install 不完整'; exit 1; }"
+          $SSH "docker inspect -f '{{.Name}} running={{.State.Running}} status={{.State.Status}} restarts={{.RestartCount}}' hijetson-ros"
+          $SSH "test \"\$(docker inspect -f '{{.State.Running}}' hijetson-ros)\" = true || { echo '容器没在运行，最后 40 行日志:'; docker logs --tail 40 hijetson-ros; echo '回退: ssh nvidia@192.168.3.78 \"sudo rm -rf /opt/hijetson/install && sudo mv /opt/hijetson/install.old /opt/hijetson/install && cd /home/nvidia/hijetson && docker compose up -d --force-recreate\"'; exit 1; }"

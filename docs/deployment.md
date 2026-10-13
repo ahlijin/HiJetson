@@ -74,7 +74,7 @@ source install/setup.bash
 export ROS_DOMAIN_ID=<Pi3同一值>
 
 # 一键启动
-ros2 launch src/launch/hijetson_voice.launch.py
+ros2 launch hijetson_bringup hijetson_voice.launch.py
 
 # 查看节点
 ros2 node list
